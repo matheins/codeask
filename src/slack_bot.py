@@ -71,7 +71,7 @@ def start_in_background(
                     thread_context = "\n---\n".join(prior)
                     question = f"Thread context:\n{thread_context}\n\nQuestion: {question}" if question else thread_context
             except Exception:
-                log.warning("[slack] Failed to fetch thread context, proceeding without it")
+                log.exception("[slack] Failed to fetch thread context")
 
         if not question:
             client.chat_postMessage(
