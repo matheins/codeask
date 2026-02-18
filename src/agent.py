@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING
 
 import anthropic
@@ -62,31 +63,25 @@ once you have enough context.
 """
 
 MAX_RETRIES = 5
-
-
-def _parse_reset_seconds(value: str) -> float:
-    """Parse an x-ratelimit-reset header value like '2025-01-01T00:00:30Z' or '30s' into seconds."""
-    import re as _re
-    from datetime import datetime, timezone
-    # Try ISO-8601 timestamp
-    try:
-        reset_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        delta = (reset_at - datetime.now(timezone.utc)).total_seconds()
-        return max(delta, 0)
-    except ValueError:
-        pass
-    # Try duration like "1s", "30s", "1m30s"
-    match = _re.match(r"(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?", value)
-    if match and (match.group(1) or match.group(2)):
-        minutes = int(match.group(1) or 0)
-        seconds = float(match.group(2) or 0)
-        return minutes * 60 + seconds
-    return 0
+# Minimum seconds between API calls; updated dynamically from response headers
+_min_interval: float = 2.0
+_last_request_time: float = 0.0
 
 
 async def _call_with_retry(client, model, messages, *, tools, system):
+    global _min_interval, _last_request_time
+
     for attempt in range(MAX_RETRIES):
+        # Pace requests based on rate limit
+        now = time.monotonic()
+        elapsed = now - _last_request_time
+        if _last_request_time > 0 and elapsed < _min_interval:
+            wait = _min_interval - elapsed
+            log.debug("Pacing: waiting %.1fs before next request", wait)
+            await asyncio.sleep(wait)
+
         try:
+            _last_request_time = time.monotonic()
             response = client.messages.with_raw_response.create(
                 model=model,
                 max_tokens=4096,
@@ -97,16 +92,12 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             headers = response.headers
             message = response.parse()
 
-            # Proactively wait if we've exhausted our request or token allowance
-            for kind in ("requests", "tokens"):
-                remaining = headers.get(f"x-ratelimit-remaining-{kind}")
-                reset = headers.get(f"x-ratelimit-reset-{kind}")
-                if remaining is not None and int(remaining) == 0 and reset:
-                    wait = _parse_reset_seconds(reset)
-                    if wait > 0:
-                        log.info("Rate limit (%s) exhausted, cooling down %.1fs", kind, wait)
-                        await asyncio.sleep(wait)
-                        break  # only need to wait once (the longer reset wins)
+            # Update pacing from rate limit headers
+            limit = headers.get("x-ratelimit-limit-requests")
+            if limit:
+                # Add 20% buffer to avoid edge cases with sliding windows
+                _min_interval = 60.0 / int(limit) * 1.2
+                log.debug("Rate limit: %s req/min, pacing at %.1fs intervals", limit, _min_interval)
 
             return message
         except anthropic.RateLimitError as e:
@@ -115,6 +106,7 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             retry_after = getattr(e.response, "headers", {}).get("retry-after")
             wait = int(retry_after) if retry_after else 60
             log.warning("Rate limited (429), retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
+            _last_request_time = time.monotonic() + wait  # account for wait in pacing
             await asyncio.sleep(wait)
 
 
