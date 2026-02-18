@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
 import threading
+from typing import TYPE_CHECKING
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -9,10 +12,17 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from src.agent import ask
 from src.config import get_settings
 
+if TYPE_CHECKING:
+    from src.mcp_client import MCPManager
+
 log = logging.getLogger(__name__)
 
 
-def start_in_background() -> threading.Thread:
+def start_in_background(
+    *,
+    mcp_manager: MCPManager | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> threading.Thread:
     """Start the Slack bot's Socket Mode handler in a background daemon thread."""
     settings = get_settings()
     app = App(token=settings.slack_bot_token)
@@ -41,7 +51,16 @@ def start_in_background() -> threading.Thread:
         )
 
         try:
-            result = asyncio.run(ask(question))
+            coro = ask(question, mcp_manager=mcp_manager)
+
+            # If we have the main event loop, schedule the coroutine there
+            # so MCP sessions (which live on that loop) are accessible.
+            if loop is not None:
+                future = asyncio.run_coroutine_threadsafe(coro, loop)
+                result = future.result(timeout=120)
+            else:
+                result = asyncio.run(coro)
+
             answer = result["answer"]
             files = result.get("files_consulted", [])
 
@@ -49,6 +68,10 @@ def start_in_background() -> threading.Thread:
             if files:
                 file_list = "\n".join(f"- `{f}`" for f in files)
                 text += f"\n\n*Files consulted:*\n{file_list}"
+
+            # Slack has a 4000-char limit per message
+            if len(text) > 3900:
+                text = text[:3900] + "\n\n_…(truncated)_"
 
             client.chat_update(
                 channel=channel,
