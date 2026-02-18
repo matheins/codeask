@@ -70,6 +70,35 @@ TOOL_SCHEMAS = [
                     "type": "string",
                     "description": "Glob to filter files, e.g. '*.py' or '*.ts'.",
                 },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of matching lines to return. Defaults to 50.",
+                },
+                "context_lines": {
+                    "type": "integer",
+                    "description": "Number of context lines to show before and after each match (like grep -C). Defaults to 0.",
+                },
+            },
+            "required": ["pattern"],
+        },
+    },
+    {
+        "name": "find_files",
+        "description": (
+            "Find files matching a glob pattern (e.g. '**/*.controller.ts', '**/auth*'). "
+            "Useful for locating files by name without browsing the full tree."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern to match (e.g. '**/*.py', '**/config*').",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Relative directory to search from. Defaults to repo root.",
+                },
             },
             "required": ["pattern"],
         },
@@ -138,9 +167,40 @@ def read_file(path: str, start_line: int | None = None, end_line: int | None = N
     return "\n".join(numbered)
 
 
-def search_code(pattern: str, path: str | None = None, file_glob: str | None = None) -> str:
+def find_files(pattern: str, path: str | None = None) -> str:
+    """Find files matching a glob pattern, relative to the repo root."""
+    base = _resolve(path or ".")
+    if not base.is_dir():
+        return f"Error: '{path}' is not a directory"
+
+    skip = {".git", "node_modules", "__pycache__", ".venv", "venv"}
+    repo_root = Path(get_settings().clone_dir).resolve()
+    matches: list[str] = []
+
+    for match in base.glob(pattern):
+        # Skip hidden/excluded dirs anywhere in the path
+        parts = match.relative_to(repo_root).parts
+        if any(p in skip or p.startswith(".") for p in parts):
+            continue
+        if match.is_file():
+            matches.append(str(match.relative_to(repo_root)))
+        if len(matches) >= 100:
+            break
+
+    if not matches:
+        return "No files found matching the pattern."
+    result = "\n".join(sorted(matches))
+    if len(matches) == 100:
+        result += "\n... (truncated at 100 results)"
+    return result
+
+
+def search_code(pattern: str, path: str | None = None, file_glob: str | None = None,
+                max_results: int | None = None, context_lines: int | None = None) -> str:
     base = Path(get_settings().clone_dir).resolve()
     search_dir = _resolve(path) if path else base
+    limit = max_results if max_results and max_results > 0 else 50
+    ctx = context_lines if context_lines and context_lines > 0 else 0
 
     cmd = [
         "grep", "-rn",
@@ -150,8 +210,11 @@ def search_code(pattern: str, path: str | None = None, file_glob: str | None = N
         "--exclude-dir=__pycache__",
         "--exclude-dir=.venv",
         "--exclude-dir=venv",
-        "-e", pattern, str(search_dir),
     ]
+    if ctx:
+        cmd += [f"-C{ctx}"]
+    cmd += ["-e", pattern, str(search_dir)]
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     except subprocess.TimeoutExpired:
@@ -161,9 +224,9 @@ def search_code(pattern: str, path: str | None = None, file_glob: str | None = N
     # Make paths relative to the repo root
     output = output.replace(str(base) + os.sep, "")
     lines = output.strip().splitlines()
-    if len(lines) > 100:
-        lines = lines[:100]
-        lines.append(f"... ({len(lines)} results, truncated)")
+    if len(lines) > limit:
+        lines = lines[:limit]
+        lines.append(f"... (truncated at {limit} results)")
     return "\n".join(lines) if lines else "No matches found"
 
 
@@ -198,7 +261,9 @@ TOOL_HANDLERS = {
         args["path"], args.get("start_line"), args.get("end_line")
     ),
     "search_code": lambda args: search_code(
-        args["pattern"], args.get("path"), args.get("file_glob")
+        args["pattern"], args.get("path"), args.get("file_glob"),
+        args.get("max_results"), args.get("context_lines"),
     ),
+    "find_files": lambda args: find_files(args["pattern"], args.get("path")),
     "file_tree": lambda args: file_tree(args.get("path"), args.get("max_depth")),
 }
