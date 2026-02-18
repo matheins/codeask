@@ -11,6 +11,22 @@ from mcp.client.stdio import stdio_client
 
 log = logging.getLogger(__name__)
 
+# Serena meta/setup tools that should not be exposed to the agent
+_HIDDEN_TOOLS = {
+    "initial_instructions",
+    "onboarding",
+    "check_onboarding_performed",
+    "prepare_for_new_conversation",
+    "switch_modes",
+    "get_current_config",
+    "activate_project",
+    "write_memory",
+    "read_memory",
+    "list_memories",
+    "delete_memory",
+    "edit_memory",
+}
+
 
 class MCPManager:
     """Manages connections to one or more MCP servers."""
@@ -64,11 +80,15 @@ class MCPManager:
         await session.initialize()
         self._sessions[name] = session
 
-        # Discover tools and build schemas
+        # Discover tools and build schemas (skip meta/setup tools)
         result = await session.list_tools()
+        exposed = 0
         for tool in result.tools:
             namespaced = f"mcp__{name}__{tool.name}"
             self._tool_map[namespaced] = (name, tool.name)
+
+            if tool.name in _HIDDEN_TOOLS:
+                continue
 
             schema = {
                 "name": namespaced,
@@ -76,11 +96,13 @@ class MCPManager:
                 "input_schema": tool.inputSchema,
             }
             self._tool_schemas.append(schema)
+            exposed += 1
 
         log.info(
-            "[mcp] Connected to '%s': %d tools discovered",
+            "[mcp] Connected to '%s': %d tools discovered, %d exposed to agent",
             name,
             len(result.tools),
+            exposed,
         )
 
         # Run onboarding if the server supports it (e.g. Serena)

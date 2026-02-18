@@ -97,14 +97,16 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             headers = response.headers
             message = response.parse()
 
-            # Proactively wait if we've exhausted our request allowance
-            remaining = headers.get("x-ratelimit-remaining-requests")
-            reset = headers.get("x-ratelimit-reset-requests")
-            if remaining is not None and int(remaining) == 0 and reset:
-                wait = _parse_reset_seconds(reset)
-                if wait > 0:
-                    log.info("Rate limit reached, cooling down %.1fs before next request", wait)
-                    await asyncio.sleep(wait)
+            # Proactively wait if we've exhausted our request or token allowance
+            for kind in ("requests", "tokens"):
+                remaining = headers.get(f"x-ratelimit-remaining-{kind}")
+                reset = headers.get(f"x-ratelimit-reset-{kind}")
+                if remaining is not None and int(remaining) == 0 and reset:
+                    wait = _parse_reset_seconds(reset)
+                    if wait > 0:
+                        log.info("Rate limit (%s) exhausted, cooling down %.1fs", kind, wait)
+                        await asyncio.sleep(wait)
+                        break  # only need to wait once (the longer reset wins)
 
             return message
         except anthropic.RateLimitError as e:
@@ -118,7 +120,7 @@ async def _call_with_retry(client, model, messages, *, tools, system):
 
 async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=0)
     max_iterations = settings.max_iterations
 
     # Build tool list: use MCP tools when available, otherwise fall back to built-ins
