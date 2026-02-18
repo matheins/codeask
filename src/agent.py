@@ -48,10 +48,19 @@ Use plain text with simple bullet points (•) for lists.
 """
 
 MCP_ADDENDUM = """
-Additional tools from external code intelligence servers are available. \
-Prefer semantic tools (symbol lookup, find references, go to definition) over grep \
-for precision queries like "what calls X?" or "where is Y defined?". \
-These tools understand code structure and give more accurate results than text search.
+IMPORTANT: You have access to Serena, a code intelligence server with semantic \
+understanding of the codebase. Prefer Serena tools over the basic built-in tools:
+- Use mcp__serena__list_dir and mcp__serena__find_file instead of file_tree/find_files \
+for navigating the project.
+- Use mcp__serena__read_file instead of read_file.
+- Use mcp__serena__search_for_pattern instead of search_code.
+- Use mcp__serena__get_symbols_overview to understand what a file or module contains \
+(classes, functions, types) — much richer than reading raw source.
+- Use mcp__serena__find_symbol to locate definitions by name.
+- Use mcp__serena__find_referencing_symbols to trace usage and call sites.
+
+Start by calling mcp__serena__initial_instructions to get Serena's recommended workflow, \
+then use its semantic tools to explore the codebase efficiently.
 """
 
 MAX_RETRIES = 5
