@@ -50,6 +50,29 @@ def start_in_background(
 
         # Strip the <@BOT_ID> mention prefix to get the actual question
         question = re.sub(r"<@[A-Z0-9]+>\s*", "", raw_text).strip()
+
+        # If mentioned inside a thread, fetch prior messages as context
+        if event.get("thread_ts"):
+            try:
+                replies = client.conversations_replies(
+                    channel=channel,
+                    ts=event["thread_ts"],
+                    limit=20,
+                )
+                prior = []
+                for msg in replies.get("messages", []):
+                    # Skip the current mention message and any bot messages
+                    if msg["ts"] == event["ts"] or msg.get("bot_id"):
+                        continue
+                    text = re.sub(r"<@[A-Z0-9]+>\s*", "", msg.get("text", "")).strip()
+                    if text:
+                        prior.append(text)
+                if prior:
+                    thread_context = "\n---\n".join(prior)
+                    question = f"Thread context:\n{thread_context}\n\nQuestion: {question}" if question else thread_context
+            except Exception:
+                log.warning("[slack] Failed to fetch thread context, proceeding without it")
+
         if not question:
             client.chat_postMessage(
                 channel=channel,
