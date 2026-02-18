@@ -65,21 +65,14 @@ once you have enough context.
 MAX_RETRIES = 5
 
 
-def _parse_reset_seconds(value: str) -> float:
-    """Parse an x-ratelimit-reset header value into seconds to wait."""
+def _seconds_until_reset(rfc3339: str) -> float:
+    """Parse an RFC 3339 reset timestamp into seconds to wait from now."""
     from datetime import datetime, timezone
-    # ISO-8601 timestamp (e.g. "2025-01-01T00:00:30Z")
     try:
-        reset_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        reset_at = datetime.fromisoformat(rfc3339.replace("Z", "+00:00"))
         return max((reset_at - datetime.now(timezone.utc)).total_seconds(), 0)
-    except ValueError:
-        pass
-    # Duration like "30s", "1m30s"
-    import re as _re
-    match = _re.match(r"(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?", value)
-    if match and (match.group(1) or match.group(2)):
-        return int(match.group(1) or 0) * 60 + float(match.group(2) or 0)
-    return 0
+    except (ValueError, TypeError):
+        return 0
 
 
 async def _call_with_retry(client, model, messages, *, tools, system):
@@ -95,24 +88,26 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             headers = response.headers
             message = response.parse()
 
-            # Proactively wait if tokens or requests are nearly exhausted
+            # Proactively wait if input tokens or requests are nearly exhausted
+            # Headers: anthropic-ratelimit-{input-tokens,requests}-{remaining,reset,limit}
             max_wait = 0.0
-            for kind in ("tokens", "requests"):
-                remaining = headers.get(f"x-ratelimit-remaining-{kind}")
-                reset = headers.get(f"x-ratelimit-reset-{kind}")
-                limit = headers.get(f"x-ratelimit-limit-{kind}")
+            for kind in ("input-tokens", "requests"):
+                remaining = headers.get(f"anthropic-ratelimit-{kind}-remaining")
+                reset = headers.get(f"anthropic-ratelimit-{kind}-reset")
+                limit = headers.get(f"anthropic-ratelimit-{kind}-limit")
                 if remaining is not None and reset:
                     rem = int(remaining)
                     lim = int(limit) if limit else 1
                     # For tokens: wait if <20% remaining. For requests: wait if 0 remaining.
-                    threshold = lim * 0.2 if kind == "tokens" else 0
+                    threshold = int(lim * 0.2) if "tokens" in kind else 0
                     if rem <= threshold:
-                        wait = _parse_reset_seconds(reset)
+                        wait = _seconds_until_reset(reset)
                         if wait > max_wait:
                             max_wait = wait
+                            log.info("Rate limit %s: %d/%d remaining, reset in %.1fs",
+                                     kind, rem, lim, wait)
 
             if max_wait > 0:
-                log.info("Rate limit low, cooling down %.1fs before next request", max_wait)
                 await asyncio.sleep(max_wait)
 
             return message
