@@ -64,23 +64,55 @@ once you have enough context.
 MAX_RETRIES = 5
 
 
+def _parse_reset_seconds(value: str) -> float:
+    """Parse an x-ratelimit-reset header value like '2025-01-01T00:00:30Z' or '30s' into seconds."""
+    import re as _re
+    from datetime import datetime, timezone
+    # Try ISO-8601 timestamp
+    try:
+        reset_at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        delta = (reset_at - datetime.now(timezone.utc)).total_seconds()
+        return max(delta, 0)
+    except ValueError:
+        pass
+    # Try duration like "1s", "30s", "1m30s"
+    match = _re.match(r"(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?", value)
+    if match and (match.group(1) or match.group(2)):
+        minutes = int(match.group(1) or 0)
+        seconds = float(match.group(2) or 0)
+        return minutes * 60 + seconds
+    return 0
+
+
 async def _call_with_retry(client, model, messages, *, tools, system):
     for attempt in range(MAX_RETRIES):
         try:
-            return client.messages.create(
+            response = client.messages.with_raw_response.create(
                 model=model,
                 max_tokens=4096,
                 system=system,
                 tools=tools,
                 messages=messages,
             )
+            headers = response.headers
+            message = response.parse()
+
+            # Proactively wait if we've exhausted our request allowance
+            remaining = headers.get("x-ratelimit-remaining-requests")
+            reset = headers.get("x-ratelimit-reset-requests")
+            if remaining is not None and int(remaining) == 0 and reset:
+                wait = _parse_reset_seconds(reset)
+                if wait > 0:
+                    log.info("Rate limit reached, cooling down %.1fs before next request", wait)
+                    await asyncio.sleep(wait)
+
+            return message
         except anthropic.RateLimitError as e:
             if attempt == MAX_RETRIES - 1:
                 raise
-            # Use retry-after header if available, otherwise default to 60s
             retry_after = getattr(e.response, "headers", {}).get("retry-after")
             wait = int(retry_after) if retry_after else 60
-            log.warning("Rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
+            log.warning("Rate limited (429), retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
             await asyncio.sleep(wait)
 
 
