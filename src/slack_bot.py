@@ -18,6 +18,21 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _markdown_to_slack(text: str) -> str:
+    """Convert standard markdown to Slack mrkdwn format."""
+    # Remove markdown headers (## Heading -> *Heading*)
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", text, flags=re.MULTILINE)
+    # Bold: **text** -> *text*
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+    # Links: [text](url) -> <url|text>
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", text)
+    # Horizontal rules -> empty line
+    text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)
+    # Bullet points: - item -> • item
+    text = re.sub(r"^- ", "• ", text, flags=re.MULTILINE)
+    return text
+
+
 def start_in_background(
     *,
     mcp_manager: MCPManager | None = None,
@@ -61,7 +76,7 @@ def start_in_background(
             else:
                 result = asyncio.run(coro)
 
-            text = result["answer"]
+            text = _markdown_to_slack(result["answer"])
 
             # Slack has a 4000-char limit per message
             if len(text) > 3900:
