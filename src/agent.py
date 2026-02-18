@@ -14,22 +14,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_BASE = """\
 You are a product expert. Your job is to answer questions about a software \
 product by exploring its codebase using the provided tools. \
 Your audience is non-technical — explain things in plain language without \
 jargon, code snippets, or implementation details. Focus on what the product \
 does and how it works from a user perspective, not how it's built.
-
-Strategy:
-1. Start with file_tree to get an overview (max_depth=2).
-2. Use find_files to locate files by name pattern when you know what you're looking for \
-(e.g. find_files with '**/*.controller.ts' or '**/auth*').
-3. Use search_code to find specific symbols or patterns — narrow your search with \
-file_glob and keep max_results low to reduce noise.
-4. Read only the key files (2-4 max) that directly answer the question.
-5. Synthesize your findings into a clear answer. Do NOT keep exploring once you \
-have enough context.
 
 IMPORTANT: You have a LIMITED number of tool calls. Be efficient. \
 Once you have read enough code to answer the question, STOP using tools and \
@@ -47,19 +37,28 @@ Use plain text with simple bullet points (•) for lists.
 - Do NOT reference file paths or line numbers unless the user specifically asked about code location.
 """
 
-MCP_ADDENDUM = """
-IMPORTANT: You have access to Serena, a code intelligence server with semantic \
-understanding of the codebase. Prefer Serena tools over the basic built-in tools:
-- Use mcp__serena__list_dir and mcp__serena__find_file instead of file_tree/find_files \
-for navigating the project.
-- Use mcp__serena__read_file instead of read_file.
-- Use mcp__serena__search_for_pattern instead of search_code.
-- Use mcp__serena__get_symbols_overview to understand what a file or module contains \
-(classes, functions, types) — much richer than reading raw source.
-- Use mcp__serena__find_symbol to locate definitions by name.
-- Use mcp__serena__find_referencing_symbols to trace usage and call sites.
+BUILTIN_STRATEGY = """
+Strategy:
+1. Start with file_tree to get an overview (max_depth=2).
+2. Use find_files to locate files by name pattern when you know what you're looking for \
+(e.g. find_files with '**/*.controller.ts' or '**/auth*').
+3. Use search_code to find specific symbols or patterns — narrow your search with \
+file_glob and keep max_results low to reduce noise.
+4. Read only the key files (2-4 max) that directly answer the question.
+5. Synthesize your findings into a clear answer. Do NOT keep exploring once you \
+have enough context.
+"""
 
-Serena is already onboarded and ready to use. Jump straight into using its tools.
+MCP_STRATEGY = """
+Strategy — use these Serena code intelligence tools:
+1. Start with list_dir (recursive=true) or find_file to locate relevant areas.
+2. Use get_symbols_overview to understand what a file or module contains \
+(classes, functions, types) — much richer than reading raw source.
+3. Use find_symbol to locate definitions by name.
+4. Use find_referencing_symbols to trace usage and call sites.
+5. Use read_file or search_for_pattern only when you need the exact source.
+6. Read 2-4 key files max, then synthesize your answer. Do NOT keep exploring \
+once you have enough context.
 """
 
 MAX_RETRIES = 5
@@ -90,15 +89,12 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     max_iterations = settings.max_iterations
 
-    # Build tool list: built-in + MCP (if available)
-    all_tools = list(TOOL_SCHEMAS)
-    if mcp_manager:
-        all_tools.extend(mcp_manager.get_tool_schemas())
+    # Build tool list: use MCP tools when available, otherwise fall back to built-ins
+    mcp_tools = mcp_manager.get_tool_schemas() if mcp_manager else []
+    all_tools = mcp_tools if mcp_tools else list(TOOL_SCHEMAS)
 
-    # Build system prompt
-    system = SYSTEM_PROMPT
-    if mcp_manager and mcp_manager.get_tool_schemas():
-        system += MCP_ADDENDUM
+    # Build system prompt with the right strategy for available tools
+    system = SYSTEM_PROMPT_BASE + (MCP_STRATEGY if mcp_tools else BUILTIN_STRATEGY)
 
     log.info("Question: %s", question)
     messages = [{"role": "user", "content": question}]
