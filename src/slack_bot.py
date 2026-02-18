@@ -72,7 +72,7 @@ def start_in_background(
             # so MCP sessions (which live on that loop) are accessible.
             if loop is not None:
                 future = asyncio.run_coroutine_threadsafe(coro, loop)
-                result = future.result(timeout=120)
+                result = future.result(timeout=300)
             else:
                 result = asyncio.run(coro)
 

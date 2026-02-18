@@ -124,7 +124,7 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                log.info("Tool call: %s(%s)", block.name, block.input)
+                log.info("Tool call: %s(%s)", block.name, {k: v for k, v in block.input.items() if k != "content"})
 
                 # Route to MCP or built-in handler
                 if mcp_manager and mcp_manager.is_mcp_tool(block.name):

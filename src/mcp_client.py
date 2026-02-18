@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -51,8 +52,10 @@ class MCPManager:
             env=cfg.get("env"),
         )
 
+        devnull = open(os.devnull, "w")
+        self._exit_stack.callback(devnull.close)
         stdio_transport = await self._exit_stack.enter_async_context(
-            stdio_client(params)
+            stdio_client(params, errlog=devnull)
         )
         read_stream, write_stream = stdio_transport
         session = await self._exit_stack.enter_async_context(
