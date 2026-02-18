@@ -34,10 +34,14 @@ give your final answer immediately. Do not try to be exhaustive.
 
 Rules:
 - Ground your answer in actual code you have read.
-- Reference specific file paths and line numbers when relevant.
 - If you cannot find enough information, say so honestly.
-- Keep your final answer concise — aim for SHORT paragraphs or bullet points.
-- Your response MUST be under 3000 characters. Be direct and avoid lengthy explanations.
+- Keep your final answer concise — short paragraphs or bullet points.
+- Your response MUST be under 3000 characters. Be direct.
+- Do NOT include any preamble, intro sentences, or meta-commentary like \
+"Let me explain" or "Based on my analysis". Jump straight into the answer.
+- Do NOT use markdown headers (##), horizontal rules (---), or other rich formatting. \
+Use plain text with simple bullet points (•) for lists.
+- Do NOT reference file paths or line numbers unless the user specifically asked about code location.
 """
 
 MCP_ADDENDUM = """

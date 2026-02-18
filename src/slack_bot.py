@@ -61,17 +61,11 @@ def start_in_background(
             else:
                 result = asyncio.run(coro)
 
-            answer = result["answer"]
-            files = result.get("files_consulted", [])
-
-            text = answer
-            if files:
-                file_list = "\n".join(f"- `{f}`" for f in files)
-                text += f"\n\n*Files consulted:*\n{file_list}"
+            text = result["answer"]
 
             # Slack has a 4000-char limit per message
             if len(text) > 3900:
-                text = text[:3900] + "\n\n_…(truncated)_"
+                text = text[:3900] + "\n\n…(truncated)"
 
             client.chat_update(
                 channel=channel,
