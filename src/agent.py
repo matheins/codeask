@@ -67,10 +67,12 @@ async def _call_with_retry(client, model, messages, *, tools, system):
                 tools=tools,
                 messages=messages,
             )
-        except anthropic.RateLimitError:
+        except anthropic.RateLimitError as e:
             if attempt == MAX_RETRIES - 1:
                 raise
-            wait = 15 * (attempt + 1)
+            # Use retry-after header if available, otherwise default to 60s
+            retry_after = getattr(e.response, "headers", {}).get("retry-after")
+            wait = int(retry_after) if retry_after else 60
             log.warning("Rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
             await asyncio.sleep(wait)
 

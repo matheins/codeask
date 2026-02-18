@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     slack_app_token: str | None = None
     sync_interval: int = 300
     api_key: str | None = None
+    mcp_servers_config: str | None = None
+    max_iterations: int = 6
 
     model_config = {"env_file": ".env"}
 
