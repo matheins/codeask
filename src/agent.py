@@ -59,8 +59,7 @@ for navigating the project.
 - Use mcp__serena__find_symbol to locate definitions by name.
 - Use mcp__serena__find_referencing_symbols to trace usage and call sites.
 
-Start by calling mcp__serena__initial_instructions to get Serena's recommended workflow, \
-then use its semantic tools to explore the codebase efficiently.
+Serena is already onboarded and ready to use. Jump straight into using its tools.
 """
 
 MAX_RETRIES = 5

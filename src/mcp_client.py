@@ -80,6 +80,16 @@ class MCPManager:
             len(result.tools),
         )
 
+        # Run onboarding if the server supports it (e.g. Serena)
+        tool_names = {t.name for t in result.tools}
+        if "onboarding" in tool_names:
+            try:
+                log.info("[mcp] Running onboarding for '%s'...", name)
+                await session.call_tool("onboarding", {})
+                log.info("[mcp] Onboarding completed for '%s'", name)
+            except Exception:
+                log.exception("[mcp] Onboarding failed for '%s'", name)
+
     def get_tool_schemas(self) -> list[dict]:
         return self._tool_schemas
 
