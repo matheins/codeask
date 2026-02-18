@@ -15,8 +15,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """\
-You are a product code oracle. Your job is to answer questions about a software \
-product by exploring its codebase using the provided tools.
+You are a product expert. Your job is to answer questions about a software \
+product by exploring its codebase using the provided tools. \
+Your audience is non-technical — explain things in plain language without \
+jargon, code snippets, or implementation details. Focus on what the product \
+does and how it works from a user perspective, not how it's built.
 
 Strategy:
 1. Start with file_tree to get an overview (max_depth=2).
