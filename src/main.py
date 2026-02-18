@@ -1,6 +1,13 @@
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    stream=sys.stdout,
+)
 
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -28,7 +35,7 @@ def _validate_startup():
     if not settings.api_key:
         missing.append("API_KEY")
     if missing:
-        print(f"[startup] ERROR: Missing required env vars: {', '.join(missing)}", file=sys.stderr)
+        log.error("Missing required env vars: %s", ", ".join(missing))
         sys.exit(1)
 
 
@@ -37,19 +44,38 @@ async def lifespan(app: FastAPI):
     _validate_startup()
 
     result = clone_or_pull()
-    print(f"[startup] {result}")
+    log.info(result)
 
     start_periodic_sync()
 
     settings = get_settings()
+
+    # Initialize MCP if configured
+    mcp_manager = None
+    if settings.mcp_servers_config:
+        from src.mcp_client import MCPManager
+
+        mcp_manager = MCPManager()
+        await mcp_manager.connect_all(settings.mcp_servers_config)
+        log.info("MCP manager initialized")
+
+    app.state.mcp_manager = mcp_manager
+
     if settings.slack_bot_token and settings.slack_app_token:
         from src.slack_bot import start_in_background
-        start_in_background()
-        print("[startup] Slack bot started (Socket Mode)")
+
+        loop = asyncio.get_running_loop()
+        start_in_background(mcp_manager=mcp_manager, loop=loop)
+        log.info("Slack bot started (Socket Mode)")
     else:
-        print("[startup] Slack tokens not configured, bot disabled")
+        log.info("Slack tokens not configured, bot disabled")
 
     yield
+
+    # Shutdown MCP
+    if mcp_manager:
+        await mcp_manager.shutdown()
+        log.info("MCP manager shut down")
 
 
 app = FastAPI(title="CodeAsk", lifespan=lifespan)
@@ -68,7 +94,7 @@ class AskResponse(BaseModel):
 async def ask_endpoint(req: AskRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
-    result = await ask(req.question)
+    result = await ask(req.question, mcp_manager=app.state.mcp_manager)
     return result
 
 

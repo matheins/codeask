@@ -64,7 +64,7 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             if attempt == MAX_RETRIES - 1:
                 raise
             wait = 15 * (attempt + 1)
-            print(f"[agent] Rate limited, retrying in {wait}s (attempt {attempt + 1}/{MAX_RETRIES})")
+            log.warning("Rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
             await asyncio.sleep(wait)
 
 
@@ -83,12 +83,13 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
     if mcp_manager and mcp_manager.get_tool_schemas():
         system += MCP_ADDENDUM
 
+    log.info("Question: %s", question)
     messages = [{"role": "user", "content": question}]
     files_consulted: set[str] = set()
 
     for step in range(max_iterations):
         remaining = max_iterations - step
-        print(f"[agent] Step {step + 1}/{max_iterations}")
+        log.info("Step %d/%d", step + 1, max_iterations)
         response = await _call_with_retry(
             client, settings.model, messages, tools=all_tools, system=system
         )
@@ -98,12 +99,16 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
             answer = "\n".join(
                 block.text for block in response.content if block.type == "text"
             )
+            log.info("Done in %d steps, %d files consulted, answer length: %d chars",
+                     step + 1, len(files_consulted), len(answer))
             return {"answer": answer, "files_consulted": sorted(files_consulted)}
 
         # Process tool calls
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
+                log.info("Tool call: %s(%s)", block.name, block.input)
+
                 # Route to MCP or built-in handler
                 if mcp_manager and mcp_manager.is_mcp_tool(block.name):
                     result = await mcp_manager.call_tool(block.name, block.input)
@@ -115,6 +120,9 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
                             files_consulted.add(block.input["path"])
                     else:
                         result = f"Unknown tool: {block.name}"
+                        log.warning("Unknown tool: %s", block.name)
+
+                log.info("Tool result: %s (%d chars)", block.name, len(result) if isinstance(result, str) else 0)
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -134,6 +142,7 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
 
         messages.append({"role": "user", "content": tool_results})
 
+    log.warning("Reached max iterations (%d) without final answer", max_iterations)
     return {
         "answer": "Reached the maximum number of exploration steps. Here is what I found so far.",
         "files_consulted": sorted(files_consulted),
