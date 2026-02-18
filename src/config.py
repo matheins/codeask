@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     sync_interval: int = 300
     api_key: str | None = None
     mcp_servers_config: str | None = None
-    max_iterations: int = 6
+    max_iterations: int = 10
 
     model_config = {"env_file": ".env"}
 
