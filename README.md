@@ -2,7 +2,10 @@
 
 <h1>🔍 CodeAsk</h1>
 
-<p><strong>Ask questions about any codebase — get instant, accurate answers powered by AI.</strong></p>
+<p><em>Tired of explaining functionality to your non-techie colleagues?<br>
+You produce more code than ever but your docs are always outdated?</em></p>
+
+<p><strong>Let anyone ask how your product works — and get answers straight from the source code.</strong></p>
 
 <p>
 CodeAsk connects Claude to your GitHub repo via <a href="https://github.com/oraios/serena">Serena</a> code intelligence,<br>
