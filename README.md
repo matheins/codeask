@@ -19,6 +19,12 @@ so it actually reads and understands your code before answering.
   <a href="#contributing"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome"></a>
 </p>
 
+<p>
+  <a href="https://railway.com/new/template?template=https://github.com/matheins/codeask"><img src="https://railway.com/button.svg" alt="Deploy on Railway" height="32"></a>
+  &nbsp;
+  <a href="https://render.com/deploy?repo=https://github.com/matheins/codeask"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="32"></a>
+</p>
+
 </div>
 
 ---

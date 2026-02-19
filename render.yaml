@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: codeask
+    runtime: docker
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GITHUB_REPO_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
