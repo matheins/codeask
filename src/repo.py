@@ -10,6 +10,9 @@ from src.config import get_settings
 
 log = logging.getLogger(__name__)
 
+# Lock to prevent concurrent git operations (e.g. background sync vs. active reads)
+repo_lock = threading.Lock()
+
 
 def _authenticated_url(url: str, token: str) -> str:
     """Inject a token into an HTTPS git URL for private repo access."""
@@ -26,19 +29,20 @@ def clone_or_pull() -> str:
     if settings.github_token and repo_url.startswith("https://"):
         repo_url = _authenticated_url(repo_url, settings.github_token)
 
-    if (clone_dir / ".git").is_dir():
-        repo = git.Repo(clone_dir)
-        repo.remotes.origin.set_url(repo_url)
-        repo.remotes.origin.pull(settings.repo_branch)
-        return f"Pulled latest changes on {settings.repo_branch}"
+    with repo_lock:
+        if (clone_dir / ".git").is_dir():
+            repo = git.Repo(clone_dir)
+            repo.remotes.origin.set_url(repo_url)
+            repo.remotes.origin.pull(settings.repo_branch)
+            return f"Pulled latest changes on {settings.repo_branch}"
 
-    clone_dir.mkdir(parents=True, exist_ok=True)
-    git.Repo.clone_from(
-        repo_url,
-        clone_dir,
-        branch=settings.repo_branch,
-    )
-    return f"Cloned {settings.github_repo_url} ({settings.repo_branch})"
+        clone_dir.mkdir(parents=True, exist_ok=True)
+        git.Repo.clone_from(
+            repo_url,
+            clone_dir,
+            branch=settings.repo_branch,
+        )
+        return f"Cloned {settings.github_repo_url} ({settings.repo_branch})"
 
 
 def start_periodic_sync() -> threading.Thread:

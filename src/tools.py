@@ -2,8 +2,6 @@ import os
 import subprocess
 from pathlib import Path
 
-from src.config import get_settings
-
 # --- Anthropic tool schemas ---
 
 TOOL_SCHEMAS = [
@@ -126,17 +124,16 @@ TOOL_SCHEMAS = [
 ]
 
 
-def _resolve(path: str) -> Path:
-    """Resolve a relative path against the clone dir, preventing traversal."""
-    base = Path(get_settings().clone_dir).resolve()
-    target = (base / path).resolve()
-    if not str(target).startswith(str(base)):
+def _resolve(path: str, base_dir: Path) -> Path:
+    """Resolve a relative path against the base dir, preventing traversal."""
+    target = (base_dir / path).resolve()
+    if not str(target).startswith(str(base_dir)):
         raise ValueError("Path traversal detected")
     return target
 
 
-def list_directory(path: str) -> str:
-    target = _resolve(path)
+def list_directory(path: str, base_dir: Path) -> str:
+    target = _resolve(path, base_dir)
     if not target.is_dir():
         return f"Error: '{path}' is not a directory"
     entries = sorted(target.iterdir())
@@ -149,8 +146,8 @@ def list_directory(path: str) -> str:
     return "\n".join(lines) if lines else "(empty directory)"
 
 
-def read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> str:
-    target = _resolve(path)
+def read_file(path: str, base_dir: Path, start_line: int | None = None, end_line: int | None = None) -> str:
+    target = _resolve(path, base_dir)
     if not target.is_file():
         return f"Error: '{path}' is not a file"
     try:
@@ -167,23 +164,22 @@ def read_file(path: str, start_line: int | None = None, end_line: int | None = N
     return "\n".join(numbered)
 
 
-def find_files(pattern: str, path: str | None = None) -> str:
+def find_files(pattern: str, base_dir: Path, path: str | None = None) -> str:
     """Find files matching a glob pattern, relative to the repo root."""
-    base = _resolve(path or ".")
+    base = _resolve(path or ".", base_dir)
     if not base.is_dir():
         return f"Error: '{path}' is not a directory"
 
     skip = {".git", "node_modules", "__pycache__", ".venv", "venv"}
-    repo_root = Path(get_settings().clone_dir).resolve()
     matches: list[str] = []
 
     for match in base.glob(pattern):
         # Skip hidden/excluded dirs anywhere in the path
-        parts = match.relative_to(repo_root).parts
+        parts = match.relative_to(base_dir).parts
         if any(p in skip or p.startswith(".") for p in parts):
             continue
         if match.is_file():
-            matches.append(str(match.relative_to(repo_root)))
+            matches.append(str(match.relative_to(base_dir)))
         if len(matches) >= 100:
             break
 
@@ -195,10 +191,9 @@ def find_files(pattern: str, path: str | None = None) -> str:
     return result
 
 
-def search_code(pattern: str, path: str | None = None, file_glob: str | None = None,
+def search_code(pattern: str, base_dir: Path, path: str | None = None, file_glob: str | None = None,
                 max_results: int | None = None, context_lines: int | None = None) -> str:
-    base = Path(get_settings().clone_dir).resolve()
-    search_dir = _resolve(path) if path else base
+    search_dir = _resolve(path, base_dir) if path else base_dir
     limit = max_results if max_results and max_results > 0 else 50
     ctx = context_lines if context_lines and context_lines > 0 else 0
 
@@ -222,7 +217,7 @@ def search_code(pattern: str, path: str | None = None, file_glob: str | None = N
 
     output = result.stdout
     # Make paths relative to the repo root
-    output = output.replace(str(base) + os.sep, "")
+    output = output.replace(str(base_dir) + os.sep, "")
     lines = output.strip().splitlines()
     if len(lines) > limit:
         lines = lines[:limit]
@@ -230,8 +225,8 @@ def search_code(pattern: str, path: str | None = None, file_glob: str | None = N
     return "\n".join(lines) if lines else "No matches found"
 
 
-def file_tree(path: str | None = None, max_depth: int | None = None) -> str:
-    base = _resolve(path or ".")
+def file_tree(path: str | None = None, max_depth: int | None = None, base_dir: Path | None = None) -> str:
+    base = _resolve(path or ".", base_dir)
     depth = max_depth or 3
     lines: list[str] = []
 
@@ -255,15 +250,17 @@ def file_tree(path: str | None = None, max_depth: int | None = None) -> str:
     return "\n".join(lines)
 
 
-TOOL_HANDLERS = {
-    "list_directory": lambda args: list_directory(args["path"]),
-    "read_file": lambda args: read_file(
-        args["path"], args.get("start_line"), args.get("end_line")
-    ),
-    "search_code": lambda args: search_code(
-        args["pattern"], args.get("path"), args.get("file_glob"),
-        args.get("max_results"), args.get("context_lines"),
-    ),
-    "find_files": lambda args: find_files(args["pattern"], args.get("path")),
-    "file_tree": lambda args: file_tree(args.get("path"), args.get("max_depth")),
-}
+def get_tool_handlers(base_dir: Path) -> dict:
+    """Return tool handler dict with *base_dir* bound into every tool call."""
+    return {
+        "list_directory": lambda args: list_directory(args["path"], base_dir),
+        "read_file": lambda args: read_file(
+            args["path"], base_dir, args.get("start_line"), args.get("end_line")
+        ),
+        "search_code": lambda args: search_code(
+            args["pattern"], base_dir, args.get("path"), args.get("file_glob"),
+            args.get("max_results"), args.get("context_lines"),
+        ),
+        "find_files": lambda args: find_files(args["pattern"], base_dir, args.get("path")),
+        "file_tree": lambda args: file_tree(args.get("path"), args.get("max_depth"), base_dir),
+    }

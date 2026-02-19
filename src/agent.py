@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import anthropic
 
 from src.config import get_settings
-from src.tools import TOOL_SCHEMAS, TOOL_HANDLERS
+from src.tools import TOOL_SCHEMAS, get_tool_handlers
 
 if TYPE_CHECKING:
     from src.mcp_client import MCPManager
@@ -124,6 +125,8 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=0)
     max_iterations = settings.max_iterations
+    base_dir = Path(settings.clone_dir).resolve()
+    tool_handlers = get_tool_handlers(base_dir)
 
     # Build tool list: use MCP tools when available, otherwise fall back to built-ins
     mcp_tools = mcp_manager.get_tool_schemas() if mcp_manager else []
@@ -162,7 +165,7 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
                 if mcp_manager and mcp_manager.is_mcp_tool(block.name):
                     result = await mcp_manager.call_tool(block.name, block.input)
                 else:
-                    handler = TOOL_HANDLERS.get(block.name)
+                    handler = tool_handlers.get(block.name)
                     if handler:
                         result = handler(block.input)
                         if block.name == "read_file":
