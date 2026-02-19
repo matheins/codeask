@@ -59,7 +59,7 @@ class ConversationManager:
             on_step: Optional async callback for discovery step labels.
 
         Returns:
-            {"answer": str, "files_consulted": list[str]}
+            {"answer": str}
         """
         # Lazy cleanup on every call
         self._cleanup_expired()

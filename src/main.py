@@ -97,7 +97,6 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    files_consulted: list[str]
 
 
 @app.post("/ask", response_model=AskResponse, dependencies=[Depends(verify_api_key)])
