@@ -216,8 +216,8 @@ async def ask(
     ]
 
     if settings.enable_thinking:
-        thinking = {"type": "adaptive", "budget_tokens": settings.thinking_budget}
-        max_tokens = settings.thinking_budget + 4096
+        thinking = {"type": "adaptive"}
+        max_tokens = 16000
     else:
         thinking = None
         max_tokens = 4096
