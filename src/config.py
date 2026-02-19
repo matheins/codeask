@@ -9,16 +9,18 @@ class Settings(BaseSettings):
     github_token: str | None = None
     repo_branch: str = "main"
     clone_dir: str = "./repo"
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "claude-sonnet-4-6-20250514"
     slack_bot_token: str | None = None
     slack_app_token: str | None = None
     sync_interval: int = 300
     api_key: str | None = None
     mcp_servers_config: str | None = None
-    max_iterations: int = 10
+    max_iterations: int = 20
     max_concurrency: int = 2
     conversation_ttl: int = 3600
     max_history_messages: int = 20
+    enable_thinking: bool = True
+    thinking_budget: int = 10000
 
     model_config = {"env_file": ".env"}
 

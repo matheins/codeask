@@ -81,8 +81,8 @@ Use plain text with simple bullet points (•) for lists.
 3. Use find_symbol to locate definitions by name.
 4. Use find_referencing_symbols to trace usage and call sites.
 5. Use read_file or search_for_pattern only when you need the exact source.
-6. Read 2-4 key files max, then synthesize your answer. Do NOT keep exploring \
-once you have enough context.
+6. Stop exploring once you have enough context to answer confidently. \
+Do not read files that won't add new information to your answer.
 """
 
 MAX_RETRIES = 5
@@ -142,7 +142,8 @@ async def _check_rate_limits(headers) -> None:
         await asyncio.sleep(max_wait)
 
 
-async def _stream_with_retry(client, model, messages, *, tools, system):
+async def _stream_with_retry(client, model, messages, *, tools, system,
+                             thinking=None, max_tokens=4096):
     """Stream a response with rate-limit retry logic.
 
     Returns (message, text_chunks) where text_chunks is a list of text deltas
@@ -151,13 +152,16 @@ async def _stream_with_retry(client, model, messages, *, tools, system):
     for attempt in range(MAX_RETRIES):
         try:
             text_chunks: list[str] = []
-            async with client.messages.stream(
+            kwargs = dict(
                 model=model,
-                max_tokens=4096,
+                max_tokens=max_tokens,
                 system=system,
                 tools=tools,
                 messages=messages,
-            ) as stream:
+            )
+            if thinking:
+                kwargs["thinking"] = thinking
+            async with client.messages.stream(**kwargs) as stream:
                 async for event in stream:
                     if (
                         event.type == "content_block_delta"
@@ -211,6 +215,13 @@ async def ask(
         {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
     ]
 
+    if settings.enable_thinking:
+        thinking = {"type": "enabled", "budget_tokens": settings.thinking_budget}
+        max_tokens = settings.thinking_budget + 4096
+    else:
+        thinking = None
+        max_tokens = 4096
+
     files_consulted: set[str] = set()
 
     for step in range(max_iterations):
@@ -218,6 +229,7 @@ async def ask(
         log.info("Step %d/%d", step + 1, max_iterations)
         response, text_chunks = await _stream_with_retry(
             client, settings.model, messages, tools=all_tools, system=system,
+            thinking=thinking, max_tokens=max_tokens,
         )
 
         # If Claude is done (no more tool calls), flush buffered text and return

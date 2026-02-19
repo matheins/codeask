@@ -97,7 +97,9 @@ docker run --env-file .env -p 8000:8000 codeask
 | `SLACK_APP_TOKEN` | No | Slack app token (`xapp-...`) for Socket Mode |
 | `SYNC_INTERVAL` | No | Seconds between repo syncs (default: `300`) |
 | `MCP_SERVERS_CONFIG` | No | Path to JSON config for additional MCP tool servers (Serena is built-in) |
-| `MAX_ITERATIONS` | No | Max agent tool-call rounds (default: `15`) |
+| `MAX_ITERATIONS` | No | Max agent tool-call rounds (default: `20`) |
+| `ENABLE_THINKING` | No | Enable extended thinking for deeper reasoning (default: `true`) |
+| `THINKING_BUDGET` | No | Token budget for thinking when enabled (default: `10000`) |
 
 ## API Reference
 
