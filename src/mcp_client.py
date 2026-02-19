@@ -124,6 +124,10 @@ class MCPManager:
             exposed,
         )
 
+        # Mark last tool schema for prompt caching (reduces cost on follow-up turns)
+        if self._tool_schemas:
+            self._tool_schemas[-1]["cache_control"] = {"type": "ephemeral"}
+
         # Run onboarding if the server supports it (e.g. Serena)
         tool_names = {t.name for t in result.tools}
         if "onboarding" in tool_names:

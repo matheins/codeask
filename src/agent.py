@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Awaitable, Callable
 
 import anthropic
 
@@ -45,6 +46,9 @@ once you have enough context.
 
 MAX_RETRIES = 5
 
+# Type alias for the streaming text callback
+OnTextChunk = Callable[[str], Awaitable[None]] | None
+
 
 def _seconds_until_reset(rfc3339: str) -> float:
     """Parse an RFC 3339 reset timestamp into seconds to wait from now."""
@@ -56,67 +60,101 @@ def _seconds_until_reset(rfc3339: str) -> float:
         return 0
 
 
-async def _call_with_retry(client, model, messages, *, tools, system):
+async def _check_rate_limits(headers) -> None:
+    """Proactively sleep if rate limits are nearly exhausted."""
+    max_wait = 0.0
+    for kind in ("input-tokens", "requests"):
+        remaining = headers.get(f"anthropic-ratelimit-{kind}-remaining")
+        reset = headers.get(f"anthropic-ratelimit-{kind}-reset")
+        limit = headers.get(f"anthropic-ratelimit-{kind}-limit")
+        if remaining is not None and reset:
+            rem = int(remaining)
+            lim = int(limit) if limit else 1
+            threshold = int(lim * 0.2) if "tokens" in kind else 0
+            if rem <= threshold:
+                wait = _seconds_until_reset(reset)
+                if wait > max_wait:
+                    max_wait = wait
+                    log.info("Rate limit %s: %d/%d remaining, reset in %.1fs",
+                             kind, rem, lim, wait)
+    if max_wait > 0:
+        await asyncio.sleep(max_wait)
+
+
+async def _stream_with_retry(client, model, messages, *, tools, system, on_text_chunk):
+    """Stream a response with rate-limit retry logic.
+
+    Returns (message, headers) where message is the final assembled Message.
+    """
     for attempt in range(MAX_RETRIES):
         try:
-            response = client.messages.with_raw_response.create(
+            async with client.messages.stream(
                 model=model,
                 max_tokens=4096,
                 system=system,
                 tools=tools,
                 messages=messages,
-            )
-            headers = response.headers
-            message = response.parse()
+            ) as stream:
+                # Stream text deltas to the callback
+                async for event in stream:
+                    if (
+                        on_text_chunk
+                        and event.type == "content_block_delta"
+                        and event.delta.type == "text_delta"
+                    ):
+                        await on_text_chunk(event.delta.text)
 
-            # Proactively wait if input tokens or requests are nearly exhausted
-            # Headers: anthropic-ratelimit-{input-tokens,requests}-{remaining,reset,limit}
-            max_wait = 0.0
-            for kind in ("input-tokens", "requests"):
-                remaining = headers.get(f"anthropic-ratelimit-{kind}-remaining")
-                reset = headers.get(f"anthropic-ratelimit-{kind}-reset")
-                limit = headers.get(f"anthropic-ratelimit-{kind}-limit")
-                if remaining is not None and reset:
-                    rem = int(remaining)
-                    lim = int(limit) if limit else 1
-                    # For tokens: wait if <20% remaining. For requests: wait if 0 remaining.
-                    threshold = int(lim * 0.2) if "tokens" in kind else 0
-                    if rem <= threshold:
-                        wait = _seconds_until_reset(reset)
-                        if wait > max_wait:
-                            max_wait = wait
-                            log.info("Rate limit %s: %d/%d remaining, reset in %.1fs",
-                                     kind, rem, lim, wait)
+                message = await stream.get_final_message()
+                headers = dict(stream.response.headers)
 
-            if max_wait > 0:
-                await asyncio.sleep(max_wait)
-
+            await _check_rate_limits(headers)
             return message
+
         except anthropic.RateLimitError as e:
             if attempt == MAX_RETRIES - 1:
                 raise
             retry_after = getattr(e.response, "headers", {}).get("retry-after")
             wait = int(retry_after) if retry_after else 60
-            log.warning("Rate limited (429), retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
+            log.warning("Rate limited (429), retrying in %ds (attempt %d/%d)",
+                        wait, attempt + 1, MAX_RETRIES)
             await asyncio.sleep(wait)
 
 
-async def ask(question: str, *, mcp_manager: MCPManager) -> dict:
+async def ask(
+    messages: list[dict],
+    *,
+    mcp_manager: MCPManager,
+    on_text_chunk: OnTextChunk = None,
+) -> dict:
+    """Run the agentic loop.
+
+    Args:
+        messages: Conversation history. The caller manages this list;
+                  new assistant/tool messages are appended in-place.
+        mcp_manager: MCP tool dispatch.
+        on_text_chunk: Optional async callback invoked with each text delta
+                       during streaming.
+
+    Returns:
+        {"answer": str, "files_consulted": list[str]}
+    """
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=0)
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
     max_iterations = settings.max_iterations
 
     all_tools = mcp_manager.get_tool_schemas()
+    system = [
+        {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+    ]
 
-    log.info("Question: %s", question)
-    messages = [{"role": "user", "content": question}]
     files_consulted: set[str] = set()
 
     for step in range(max_iterations):
         remaining = max_iterations - step
         log.info("Step %d/%d", step + 1, max_iterations)
-        response = await _call_with_retry(
-            client, settings.model, messages, tools=all_tools, system=SYSTEM_PROMPT
+        response = await _stream_with_retry(
+            client, settings.model, messages, tools=all_tools, system=system,
+            on_text_chunk=on_text_chunk,
         )
 
         # If Claude is done (no more tool calls), extract the final answer
@@ -126,6 +164,7 @@ async def ask(question: str, *, mcp_manager: MCPManager) -> dict:
             )
             log.info("Done in %d steps, %d files consulted, answer length: %d chars",
                      step + 1, len(files_consulted), len(answer))
+            messages.append({"role": "assistant", "content": response.content})
             return {"answer": answer, "files_consulted": sorted(files_consulted)}
 
         # Process tool calls

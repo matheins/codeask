@@ -4,18 +4,21 @@ import asyncio
 import logging
 import re
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from src.agent import ask
 from src.config import get_settings
 
 if TYPE_CHECKING:
-    from src.mcp_client import MCPManager
+    from src.conversation_manager import ConversationManager
 
 log = logging.getLogger(__name__)
+
+# Minimum interval between Slack message updates (seconds)
+_UPDATE_THROTTLE = 1.5
 
 
 def _markdown_to_slack(text: str) -> str:
@@ -35,7 +38,7 @@ def _markdown_to_slack(text: str) -> str:
 
 def start_in_background(
     *,
-    mcp_manager: MCPManager,
+    conversation_manager: ConversationManager,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> threading.Thread:
     """Start the Slack bot's Socket Mode handler in a background daemon thread."""
@@ -50,28 +53,6 @@ def start_in_background(
 
         # Strip the <@BOT_ID> mention prefix to get the actual question
         question = re.sub(r"<@[A-Z0-9]+>\s*", "", raw_text).strip()
-
-        # If mentioned inside a thread, fetch prior messages as context
-        if event.get("thread_ts"):
-            try:
-                replies = client.conversations_replies(
-                    channel=channel,
-                    ts=event["thread_ts"],
-                    limit=20,
-                )
-                prior = []
-                for msg in replies.get("messages", []):
-                    # Skip the current mention message and any bot messages
-                    if msg["ts"] == event["ts"] or msg.get("bot_id"):
-                        continue
-                    text = re.sub(r"<@[A-Z0-9]+>\s*", "", msg.get("text", "")).strip()
-                    if text:
-                        prior.append(text)
-                if prior:
-                    thread_context = "\n---\n".join(prior)
-                    question = f"Thread context:\n{thread_context}\n\nQuestion: {question}" if question else thread_context
-            except Exception:
-                log.exception("[slack] Failed to fetch thread context")
 
         if not question:
             client.chat_postMessage(
@@ -88,11 +69,40 @@ def start_in_background(
             text=":hourglass_flowing_sand: Thinking...",
         )
 
-        try:
-            coro = ask(question, mcp_manager=mcp_manager)
+        # Use thread_ts as conversation_id for follow-up context
+        conversation_id = f"slack:{channel}:{thread_ts}"
 
-            # If we have the main event loop, schedule the coroutine there
-            # so MCP sessions (which live on that loop) are accessible.
+        # Streaming buffer and throttle state
+        buf = []
+        last_update = [0.0]  # mutable for closure
+
+        async def on_text_chunk(text: str):
+            buf.append(text)
+            now = time.monotonic()
+            if now - last_update[0] < _UPDATE_THROTTLE:
+                return
+            last_update[0] = now
+            partial = _markdown_to_slack("".join(buf))
+            if len(partial) > 3900:
+                partial = partial[:3900] + "\n\n…(streaming)"
+            try:
+                client.chat_update(
+                    channel=channel,
+                    ts=thinking["ts"],
+                    text=partial,
+                )
+            except Exception:
+                pass  # skip silently; final update will send the complete answer
+
+        try:
+            coro = conversation_manager.ask(
+                question,
+                conversation_id=conversation_id,
+                on_text_chunk=on_text_chunk,
+            )
+
+            # Schedule the coroutine on the main event loop so MCP sessions
+            # (which live on that loop) are accessible.
             if loop is not None:
                 future = asyncio.run_coroutine_threadsafe(coro, loop)
                 result = future.result(timeout=300)

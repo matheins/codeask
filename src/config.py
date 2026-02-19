@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     api_key: str | None = None
     mcp_servers_config: str | None = None
     max_iterations: int = 10
+    max_concurrency: int = 2
+    conversation_ttl: int = 3600
 
     model_config = {"env_file": ".env"}
 

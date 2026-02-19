@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -10,13 +11,14 @@ logging.basicConfig(
 )
 
 from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from src.config import get_settings
+from src.conversation_manager import ConversationManager
 from src.mcp_client import MCPManager
 from src.repo import clone_or_pull, start_periodic_sync
-from src.agent import ask
 
 log = logging.getLogger(__name__)
 
@@ -59,13 +61,20 @@ async def lifespan(app: FastAPI):
     )
     log.info("MCP manager initialized")
 
+    # Initialize ConversationManager
+    conversation_manager = ConversationManager(
+        mcp_manager=mcp_manager,
+        max_concurrency=settings.max_concurrency,
+        conversation_ttl=settings.conversation_ttl,
+    )
     app.state.mcp_manager = mcp_manager
+    app.state.conversation_manager = conversation_manager
 
     if settings.slack_bot_token and settings.slack_app_token:
         from src.slack_bot import start_in_background
 
         loop = asyncio.get_running_loop()
-        start_in_background(mcp_manager=mcp_manager, loop=loop)
+        start_in_background(conversation_manager=conversation_manager, loop=loop)
         log.info("Slack bot started (Socket Mode)")
     else:
         log.info("Slack tokens not configured, bot disabled")
@@ -82,6 +91,7 @@ app = FastAPI(title="CodeAsk", lifespan=lifespan)
 
 class AskRequest(BaseModel):
     question: str
+    conversation_id: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -93,8 +103,48 @@ class AskResponse(BaseModel):
 async def ask_endpoint(req: AskRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
-    result = await ask(req.question, mcp_manager=app.state.mcp_manager)
+    result = await app.state.conversation_manager.ask(
+        req.question, conversation_id=req.conversation_id,
+    )
     return result
+
+
+@app.post("/ask/stream", dependencies=[Depends(verify_api_key)])
+async def ask_stream_endpoint(req: AskRequest):
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def on_text_chunk(text: str):
+        await queue.put(text)
+
+    async def generate():
+        async def _run():
+            try:
+                result = await app.state.conversation_manager.ask(
+                    req.question,
+                    conversation_id=req.conversation_id,
+                    on_text_chunk=on_text_chunk,
+                )
+                await queue.put(None)  # signal end of stream
+                return result
+            except Exception:
+                await queue.put(None)
+                raise
+
+        task = asyncio.create_task(_run())
+
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+
+        result = await task
+        yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 class SyncResponse(BaseModel):
