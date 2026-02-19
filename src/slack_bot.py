@@ -45,6 +45,46 @@ def start_in_background(
     settings = get_settings()
     app = App(token=settings.slack_bot_token)
 
+    # Resolve bot user ID so we can filter our own messages from thread replies
+    try:
+        bot_user_id = app.client.auth_test()["user_id"]
+    except Exception:
+        log.warning("[slack] Could not resolve bot user ID; thread context disabled")
+        bot_user_id = None
+
+    def _get_missed_thread_messages(client, channel, thread_ts, current_ts):
+        """Return human messages posted after the last bot reply in the thread."""
+        if not bot_user_id:
+            return []
+        try:
+            result = client.conversations_replies(channel=channel, ts=thread_ts)
+        except Exception:
+            log.debug("Failed to fetch thread replies for context")
+            return []
+
+        replies = result.get("messages", [])
+
+        # Find the last message from our bot
+        last_bot_ts = None
+        for msg in replies:
+            if msg.get("user") == bot_user_id:
+                last_bot_ts = msg["ts"]
+
+        # Collect human messages after that point, excluding the current mention
+        missed = []
+        for msg in replies:
+            if msg.get("user") == bot_user_id:
+                continue
+            if msg["ts"] == current_ts:
+                continue
+            if last_bot_ts and msg["ts"] <= last_bot_ts:
+                continue
+            text = re.sub(r"<@[A-Z0-9]+>\s*", "", msg.get("text", "")).strip()
+            if text:
+                missed.append(text)
+
+        return missed
+
     @app.event("app_mention")
     def handle_mention(event, client):
         channel = event["channel"]
@@ -61,6 +101,15 @@ def start_in_background(
                 text="Please include a question after mentioning me.",
             )
             return
+
+        # Prepend any thread messages the bot missed (sent without mentioning it)
+        missed = _get_missed_thread_messages(client, channel, thread_ts, event["ts"])
+        if missed:
+            context = "\n".join(f"- {m}" for m in missed)
+            question = (
+                f"[Messages in this thread since last response:]\n{context}"
+                f"\n\n[New question:]\n{question}"
+            )
 
         # Post a "thinking" placeholder
         thinking = client.chat_postMessage(

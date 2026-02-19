@@ -79,6 +79,7 @@ class ConversationManager:
         # Keep the first user message (for context) and the most recent messages.
         if len(messages) > self._max_history_messages:
             trimmed = len(messages) - self._max_history_messages
+            trimmed += trimmed % 2  # round up to even to preserve assistant/user pairs
             messages[:] = messages[:1] + messages[1 + trimmed:]
             log.info("Trimmed %d old messages from conversation %s",
                      trimmed, conversation_id)
