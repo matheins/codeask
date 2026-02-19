@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from src.config import get_settings
 from src.conversation_manager import ConversationManager
-from src.mcp_client import MCPManager
+from src.mcp_client import MCPManager  # used directly in lifespan
 from src.repo import clone_or_pull, start_periodic_sync
 
 log = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI):
         mcp_manager=mcp_manager,
         max_concurrency=settings.max_concurrency,
         conversation_ttl=settings.conversation_ttl,
+        max_history_messages=settings.max_history_messages,
     )
     app.state.mcp_manager = mcp_manager
     app.state.conversation_manager = conversation_manager
@@ -141,8 +142,12 @@ async def ask_stream_endpoint(req: AskRequest):
                 break
             yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
 
-        result = await task
-        yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
+        try:
+            result = await task
+            yield f"data: {json.dumps({'type': 'done', **result})}\n\n"
+        except Exception as e:
+            log.exception("Error during streaming ask")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

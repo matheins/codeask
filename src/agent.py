@@ -47,7 +47,7 @@ once you have enough context.
 MAX_RETRIES = 5
 
 # Type alias for the streaming text callback
-OnTextChunk = Callable[[str], Awaitable[None]] | None
+OnTextChunk = Callable[[str], Awaitable[None]]
 
 
 def _seconds_until_reset(rfc3339: str) -> float:
@@ -81,10 +81,10 @@ async def _check_rate_limits(headers) -> None:
         await asyncio.sleep(max_wait)
 
 
-async def _stream_with_retry(client, model, messages, *, tools, system, on_text_chunk):
+async def _stream_with_retry(client, model, messages, *, tools, system, on_text_chunk: OnTextChunk | None):
     """Stream a response with rate-limit retry logic.
 
-    Returns (message, headers) where message is the final assembled Message.
+    Returns the final assembled Message.
     """
     for attempt in range(MAX_RETRIES):
         try:
@@ -124,7 +124,7 @@ async def ask(
     messages: list[dict],
     *,
     mcp_manager: MCPManager,
-    on_text_chunk: OnTextChunk = None,
+    on_text_chunk: OnTextChunk | None = None,
 ) -> dict:
     """Run the agentic loop.
 

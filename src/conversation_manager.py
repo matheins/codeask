@@ -18,10 +18,12 @@ class ConversationManager:
         mcp_manager: MCPManager,
         max_concurrency: int = 2,
         conversation_ttl: int = 3600,
+        max_history_messages: int = 20,
     ) -> None:
         self._mcp_manager = mcp_manager
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._conversation_ttl = conversation_ttl
+        self._max_history_messages = max_history_messages
         # conversation_id -> message history
         self._histories: dict[str, list[dict]] = {}
         # conversation_id -> last access timestamp
@@ -45,7 +47,7 @@ class ConversationManager:
         question: str,
         *,
         conversation_id: str | None = None,
-        on_text_chunk: OnTextChunk = None,
+        on_text_chunk: OnTextChunk | None = None,
     ) -> dict:
         """Ask a question, optionally continuing an existing conversation.
 
@@ -70,6 +72,14 @@ class ConversationManager:
         if conversation_id:
             self._histories[conversation_id] = messages
             self._last_access[conversation_id] = time.monotonic()
+
+        # Truncate history to avoid exceeding context window.
+        # Keep the first user message (for context) and the most recent messages.
+        if len(messages) > self._max_history_messages:
+            trimmed = len(messages) - self._max_history_messages
+            messages[:] = messages[:1] + messages[1 + trimmed:]
+            log.info("Trimmed %d old messages from conversation %s",
+                     trimmed, conversation_id)
 
         log.info("Question (conversation=%s, history=%d msgs): %s",
                  conversation_id or "none", len(messages), question)

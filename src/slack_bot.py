@@ -86,10 +86,15 @@ def start_in_background(
             if len(partial) > 3900:
                 partial = partial[:3900] + "\n\n…(streaming)"
             try:
-                client.chat_update(
-                    channel=channel,
-                    ts=thinking["ts"],
-                    text=partial,
+                # Run sync Slack SDK call in a thread pool to avoid blocking
+                # the event loop
+                await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: client.chat_update(
+                        channel=channel,
+                        ts=thinking["ts"],
+                        text=partial,
+                    ),
                 )
             except Exception:
                 pass  # skip silently; final update will send the complete answer

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     max_iterations: int = 10
     max_concurrency: int = 2
     conversation_ttl: int = 3600
+    max_history_messages: int = 20
 
     model_config = {"env_file": ".env"}
 
