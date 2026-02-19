@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from src.agent import ask, OnTextChunk
+from src.agent import ask, OnTextChunk, OnStep
 from src.mcp_client import MCPManager
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ class ConversationManager:
         *,
         conversation_id: str | None = None,
         on_text_chunk: OnTextChunk | None = None,
+        on_step: OnStep | None = None,
     ) -> dict:
         """Ask a question, optionally continuing an existing conversation.
 
@@ -55,6 +56,7 @@ class ConversationManager:
             question: The user's question.
             conversation_id: If provided, reuses message history for follow-ups.
             on_text_chunk: Optional async callback for streaming text deltas.
+            on_step: Optional async callback for discovery step labels.
 
         Returns:
             {"answer": str, "files_consulted": list[str]}
@@ -89,6 +91,7 @@ class ConversationManager:
                 messages,
                 mcp_manager=self._mcp_manager,
                 on_text_chunk=on_text_chunk,
+                on_step=on_step,
             )
 
         # Update last access after the agent run

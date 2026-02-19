@@ -115,10 +115,13 @@ async def ask_stream_endpoint(req: AskRequest):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_step(category: str):
+        await queue.put({"type": "step", "label": category})
 
     async def on_text_chunk(text: str):
-        await queue.put(text)
+        await queue.put({"type": "text", "content": text})
 
     async def generate():
         async def _run():
@@ -127,6 +130,7 @@ async def ask_stream_endpoint(req: AskRequest):
                     req.question,
                     conversation_id=req.conversation_id,
                     on_text_chunk=on_text_chunk,
+                    on_step=on_step,
                 )
                 await queue.put(None)  # signal end of stream
                 return result
@@ -137,10 +141,10 @@ async def ask_stream_endpoint(req: AskRequest):
         task = asyncio.create_task(_run())
 
         while True:
-            chunk = await queue.get()
-            if chunk is None:
+            event = await queue.get()
+            if event is None:
                 break
-            yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
+            yield f"data: {json.dumps(event)}\n\n"
 
         try:
             result = await task

@@ -72,9 +72,34 @@ def start_in_background(
         # Use thread_ts as conversation_id for follow-up context
         conversation_id = f"slack:{channel}:{thread_ts}"
 
+        # Emoji mapping for step categories
+        step_emojis = {
+            "Searching": ":mag:",
+            "Reading": ":books:",
+            "Analyzing": ":gear:",
+            "Exploring": ":compass:",
+        }
+
         # Streaming buffer and throttle state
         buf = []
         last_update = [0.0]  # mutable for closure
+        step_count = [0]  # mutable for closure
+
+        async def on_step(category: str):
+            step_count[0] += 1
+            emoji = step_emojis.get(category, ":compass:")
+            step_text = f"{emoji} {category}..."
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: client.chat_update(
+                        channel=channel,
+                        ts=thinking["ts"],
+                        text=step_text,
+                    ),
+                )
+            except Exception:
+                pass  # skip silently; final update will send the complete answer
 
         async def on_text_chunk(text: str):
             buf.append(text)
@@ -104,6 +129,7 @@ def start_in_background(
                 question,
                 conversation_id=conversation_id,
                 on_text_chunk=on_text_chunk,
+                on_step=on_step,
             )
 
             # Schedule the coroutine on the main event loop so MCP sessions

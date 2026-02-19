@@ -49,6 +49,26 @@ MAX_RETRIES = 5
 # Type alias for the streaming text callback
 OnTextChunk = Callable[[str], Awaitable[None]]
 
+# Type alias for discovery step callback (receives a category label)
+OnStep = Callable[[str], Awaitable[None]]
+
+# Maps short tool names (after last __) to generic category labels
+_TOOL_CATEGORIES: dict[str, str] = {
+    "read_file": "Reading",
+    "list_dir": "Searching",
+    "find_file": "Searching",
+    "search_for_pattern": "Searching",
+    "get_symbols_overview": "Analyzing",
+    "find_symbol": "Analyzing",
+    "find_referencing_symbols": "Analyzing",
+}
+
+
+def _tool_category(namespaced_name: str) -> str:
+    """Extract a safe, generic category label from a namespaced tool name."""
+    short = namespaced_name.rsplit("__", 1)[-1]
+    return _TOOL_CATEGORIES.get(short, "Exploring")
+
 
 def _seconds_until_reset(rfc3339: str) -> float:
     """Parse an RFC 3339 reset timestamp into seconds to wait from now."""
@@ -81,13 +101,15 @@ async def _check_rate_limits(headers) -> None:
         await asyncio.sleep(max_wait)
 
 
-async def _stream_with_retry(client, model, messages, *, tools, system, on_text_chunk: OnTextChunk | None):
+async def _stream_with_retry(client, model, messages, *, tools, system):
     """Stream a response with rate-limit retry logic.
 
-    Returns the final assembled Message.
+    Returns (message, text_chunks) where text_chunks is a list of text deltas
+    collected during streaming.
     """
     for attempt in range(MAX_RETRIES):
         try:
+            text_chunks: list[str] = []
             async with client.messages.stream(
                 model=model,
                 max_tokens=4096,
@@ -95,20 +117,18 @@ async def _stream_with_retry(client, model, messages, *, tools, system, on_text_
                 tools=tools,
                 messages=messages,
             ) as stream:
-                # Stream text deltas to the callback
                 async for event in stream:
                     if (
-                        on_text_chunk
-                        and event.type == "content_block_delta"
+                        event.type == "content_block_delta"
                         and event.delta.type == "text_delta"
                     ):
-                        await on_text_chunk(event.delta.text)
+                        text_chunks.append(event.delta.text)
 
                 message = await stream.get_final_message()
                 headers = dict(stream.response.headers)
 
             await _check_rate_limits(headers)
-            return message
+            return message, text_chunks
 
         except anthropic.RateLimitError as e:
             if attempt == MAX_RETRIES - 1:
@@ -125,6 +145,7 @@ async def ask(
     *,
     mcp_manager: MCPManager,
     on_text_chunk: OnTextChunk | None = None,
+    on_step: OnStep | None = None,
 ) -> dict:
     """Run the agentic loop.
 
@@ -133,7 +154,9 @@ async def ask(
                   new assistant/tool messages are appended in-place.
         mcp_manager: MCP tool dispatch.
         on_text_chunk: Optional async callback invoked with each text delta
-                       during streaming.
+                       during streaming. Only fires for the final answer turn.
+        on_step: Optional async callback invoked with a category label before
+                 each tool call during discovery turns.
 
     Returns:
         {"answer": str, "files_consulted": list[str]}
@@ -152,13 +175,16 @@ async def ask(
     for step in range(max_iterations):
         remaining = max_iterations - step
         log.info("Step %d/%d", step + 1, max_iterations)
-        response = await _stream_with_retry(
+        response, text_chunks = await _stream_with_retry(
             client, settings.model, messages, tools=all_tools, system=system,
-            on_text_chunk=on_text_chunk,
         )
 
-        # If Claude is done (no more tool calls), extract the final answer
+        # If Claude is done (no more tool calls), flush buffered text and return
         if response.stop_reason == "end_turn":
+            if on_text_chunk:
+                for chunk in text_chunks:
+                    await on_text_chunk(chunk)
+
             answer = "\n".join(
                 block.text for block in response.content if block.type == "text"
             )
@@ -167,11 +193,14 @@ async def ask(
             messages.append({"role": "assistant", "content": response.content})
             return {"answer": answer, "files_consulted": sorted(files_consulted)}
 
-        # Process tool calls
+        # Process tool calls — emit step events before each tool execution
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
                 log.info("Tool call: %s(%s)", block.name, {k: v for k, v in block.input.items() if k != "content"})
+
+                if on_step:
+                    await on_step(_tool_category(block.name))
 
                 result = await mcp_manager.call_tool(block.name, block.input)
 
