@@ -125,12 +125,45 @@ curl -X POST http://localhost:8000/sync \
 
 ## Slack Integration
 
-1. Create a Slack app with **Socket Mode** enabled
-2. Add bot token scopes: `app_mentions:read`, `chat:write`, `channels:history`, `groups:history`
-3. Subscribe to the `app_mention` event
-4. Set `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` in your `.env`
+### 1. Create a Slack App
 
-The bot will start automatically when both tokens are present.
+- Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** → **From scratch**
+- Give it a name (e.g. "CodeAsk") and select your workspace
+
+### 2. Enable Socket Mode
+
+- In the left sidebar, go to **Socket Mode** and toggle it **on**
+- You'll be prompted to create an **App-Level Token** — give it a name (e.g. "codeask-socket") and add the `connections:write` scope
+- Copy the token (starts with `xapp-...`) → this is your **`SLACK_APP_TOKEN`**
+
+### 3. Add Bot Token Scopes
+
+- Go to **OAuth & Permissions** in the left sidebar
+- Under **Bot Token Scopes**, add:
+  - `app_mentions:read` — lets the bot see when it's mentioned
+  - `chat:write` — lets the bot send messages
+  - `channels:history` — lets the bot read thread context in public channels
+  - `groups:history` — lets the bot read thread context in private channels
+
+### 4. Install the App to Your Workspace
+
+- Go to **OAuth & Permissions** and click **Install to Workspace**
+- Authorize the app
+- Copy the **Bot User OAuth Token** (starts with `xoxb-...`) → this is your **`SLACK_BOT_TOKEN`**
+
+### 5. Subscribe to Events
+
+- Go to **Event Subscriptions** in the left sidebar and toggle it **on**
+- Under **Subscribe to bot events**, add `app_mention`
+
+### 6. Configure Your `.env`
+
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+```
+
+The bot will start automatically when both tokens are present. Invite it to a channel and mention it to ask a question.
 
 ## Extending with MCP Servers
 
