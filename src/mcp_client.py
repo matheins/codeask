@@ -27,6 +27,14 @@ _HIDDEN_TOOLS = {
     "edit_memory",
 }
 
+_SERENA_SERVER_NAME = "serena"
+_SERENA_COMMAND = "uvx"
+_SERENA_ARGS_PREFIX = [
+    "--from", "git+https://github.com/oraios/serena",
+    "serena", "start-mcp-server",
+    "--project",
+]
+
 
 class MCPManager:
     """Manages connections to one or more MCP servers."""
@@ -40,26 +48,37 @@ class MCPManager:
         # cached Anthropic-format tool schemas
         self._tool_schemas: list[dict] = []
 
-    async def connect_all(self, config_path: str) -> None:
-        """Read the config file and connect to all defined MCP servers."""
-        path = Path(config_path)
-        if not path.is_file():
-            log.warning("[mcp] Config file not found: %s", config_path)
-            return
-
-        config = json.loads(path.read_text())
-        servers = config.get("mcpServers", {})
-        if not servers:
-            log.warning("[mcp] No servers defined in %s", config_path)
-            return
-
+    async def connect_all(
+        self, clone_dir: str, extra_config_path: str | None = None
+    ) -> None:
+        """Connect to built-in Serena server and any extra MCP servers."""
         await self._exit_stack.__aenter__()
 
-        for server_name, server_cfg in servers.items():
-            try:
-                await self._connect_server(server_name, server_cfg)
-            except Exception:
-                log.exception("[mcp] Failed to connect to server '%s'", server_name)
+        # 1. Built-in Serena — failure is fatal
+        serena_cfg = {
+            "command": _SERENA_COMMAND,
+            "args": _SERENA_ARGS_PREFIX + [str(Path(clone_dir).resolve())],
+        }
+        await self._connect_server(_SERENA_SERVER_NAME, serena_cfg)
+
+        # 2. Optional extra servers from config file
+        if extra_config_path:
+            path = Path(extra_config_path)
+            if path.is_file():
+                config = json.loads(path.read_text())
+                servers = config.get("mcpServers", {})
+                for server_name, server_cfg in servers.items():
+                    try:
+                        await self._connect_server(server_name, server_cfg)
+                    except Exception:
+                        log.exception(
+                            "[mcp] Failed to connect to extra server '%s'",
+                            server_name,
+                        )
+            else:
+                log.warning(
+                    "[mcp] Extra config file not found: %s", extra_config_path
+                )
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
         params = StdioServerParameters(

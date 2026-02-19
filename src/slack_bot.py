@@ -35,7 +35,7 @@ def _markdown_to_slack(text: str) -> str:
 
 def start_in_background(
     *,
-    mcp_manager: MCPManager | None = None,
+    mcp_manager: MCPManager,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> threading.Thread:
     """Start the Slack bot's Socket Mode handler in a background daemon thread."""

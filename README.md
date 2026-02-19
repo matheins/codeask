@@ -45,7 +45,7 @@ cp .env.example .env
 | `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | No | Slack app token (`xapp-...`) for Socket Mode |
 | `SYNC_INTERVAL` | No | Seconds between repo syncs (default: `300`) |
-| `MCP_SERVERS_CONFIG` | No | Path to `mcp_servers.json` for external tool servers |
+| `MCP_SERVERS_CONFIG` | No | Path to JSON config for additional MCP tool servers (Serena is built-in) |
 | `MAX_ITERATIONS` | No | Max agent tool-call rounds (default: `15`) |
 
 ## Running
@@ -98,21 +98,22 @@ To enable the Slack bot:
 
 ## MCP servers
 
-You can extend the agent's capabilities by connecting MCP tool servers. Create a `mcp_servers.json` file:
+Serena (code intelligence) is built-in and connects automatically — no configuration needed.
+
+You can extend the agent with additional MCP tool servers by creating a JSON config file:
 
 ```json
 {
-  "servers": [
-    {
-      "name": "example",
+  "mcpServers": {
+    "example": {
       "command": "npx",
       "args": ["-y", "@example/mcp-server"]
     }
-  ]
+  }
 }
 ```
 
-Set `MCP_SERVERS_CONFIG=mcp_servers.json` in your `.env`.
+Set `MCP_SERVERS_CONFIG=path/to/config.json` in your `.env`.
 
 ## License
 

@@ -14,6 +14,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from src.config import get_settings
+from src.mcp_client import MCPManager
 from src.repo import clone_or_pull, start_periodic_sync
 from src.agent import ask
 
@@ -50,14 +51,13 @@ async def lifespan(app: FastAPI):
 
     settings = get_settings()
 
-    # Initialize MCP if configured
-    mcp_manager = None
-    if settings.mcp_servers_config:
-        from src.mcp_client import MCPManager
-
-        mcp_manager = MCPManager()
-        await mcp_manager.connect_all(settings.mcp_servers_config)
-        log.info("MCP manager initialized")
+    # Initialize MCP
+    mcp_manager = MCPManager()
+    await mcp_manager.connect_all(
+        clone_dir=settings.clone_dir,
+        extra_config_path=settings.mcp_servers_config,
+    )
+    log.info("MCP manager initialized")
 
     app.state.mcp_manager = mcp_manager
 
@@ -73,9 +73,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown MCP
-    if mcp_manager:
-        await mcp_manager.shutdown()
-        log.info("MCP manager shut down")
+    await mcp_manager.shutdown()
+    log.info("MCP manager shut down")
 
 
 app = FastAPI(title="CodeAsk", lifespan=lifespan)

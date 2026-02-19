@@ -2,21 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from pathlib import Path
-from typing import TYPE_CHECKING
 
 import anthropic
 
 from src.config import get_settings
-from src.tools import TOOL_SCHEMAS, get_tool_handlers
-
-if TYPE_CHECKING:
-    from src.mcp_client import MCPManager
+from src.mcp_client import MCPManager
 
 log = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_BASE = """\
+SYSTEM_PROMPT = """\
 You are a product expert. Your job is to answer questions about a software \
 product by exploring its codebase using the provided tools. \
 Your audience is non-technical — explain things in plain language without \
@@ -37,21 +31,7 @@ Rules:
 - Do NOT use markdown headers (##), horizontal rules (---), or other rich formatting. \
 Use plain text with simple bullet points (•) for lists.
 - Do NOT reference file paths or line numbers unless the user specifically asked about code location.
-"""
 
-BUILTIN_STRATEGY = """
-Strategy:
-1. Start with file_tree to get an overview (max_depth=2).
-2. Use find_files to locate files by name pattern when you know what you're looking for \
-(e.g. find_files with '**/*.controller.ts' or '**/auth*').
-3. Use search_code to find specific symbols or patterns — narrow your search with \
-file_glob and keep max_results low to reduce noise.
-4. Read only the key files (2-4 max) that directly answer the question.
-5. Synthesize your findings into a clear answer. Do NOT keep exploring once you \
-have enough context.
-"""
-
-MCP_STRATEGY = """
 Strategy — use these Serena code intelligence tools:
 1. Start with list_dir (recursive=true) or find_file to locate relevant areas.
 2. Use get_symbols_overview to understand what a file or module contains \
@@ -121,19 +101,12 @@ async def _call_with_retry(client, model, messages, *, tools, system):
             await asyncio.sleep(wait)
 
 
-async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
+async def ask(question: str, *, mcp_manager: MCPManager) -> dict:
     settings = get_settings()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=0)
     max_iterations = settings.max_iterations
-    base_dir = Path(settings.clone_dir).resolve()
-    tool_handlers = get_tool_handlers(base_dir)
 
-    # Build tool list: use MCP tools when available, otherwise fall back to built-ins
-    mcp_tools = mcp_manager.get_tool_schemas() if mcp_manager else []
-    all_tools = mcp_tools if mcp_tools else list(TOOL_SCHEMAS)
-
-    # Build system prompt with the right strategy for available tools
-    system = SYSTEM_PROMPT_BASE + (MCP_STRATEGY if mcp_tools else BUILTIN_STRATEGY)
+    all_tools = mcp_manager.get_tool_schemas()
 
     log.info("Question: %s", question)
     messages = [{"role": "user", "content": question}]
@@ -143,7 +116,7 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
         remaining = max_iterations - step
         log.info("Step %d/%d", step + 1, max_iterations)
         response = await _call_with_retry(
-            client, settings.model, messages, tools=all_tools, system=system
+            client, settings.model, messages, tools=all_tools, system=SYSTEM_PROMPT
         )
 
         # If Claude is done (no more tool calls), extract the final answer
@@ -161,18 +134,13 @@ async def ask(question: str, *, mcp_manager: MCPManager | None = None) -> dict:
             if block.type == "tool_use":
                 log.info("Tool call: %s(%s)", block.name, {k: v for k, v in block.input.items() if k != "content"})
 
-                # Route to MCP or built-in handler
-                if mcp_manager and mcp_manager.is_mcp_tool(block.name):
-                    result = await mcp_manager.call_tool(block.name, block.input)
-                else:
-                    handler = tool_handlers.get(block.name)
-                    if handler:
-                        result = handler(block.input)
-                        if block.name == "read_file":
-                            files_consulted.add(block.input["path"])
-                    else:
-                        result = f"Unknown tool: {block.name}"
-                        log.warning("Unknown tool: %s", block.name)
+                result = await mcp_manager.call_tool(block.name, block.input)
+
+                # Track files read via MCP
+                if block.name.endswith("__read_file"):
+                    path = block.input.get("path") or block.input.get("file_path")
+                    if path:
+                        files_consulted.add(path)
 
                 log.info("Tool result: %s (%d chars)", block.name, len(result) if isinstance(result, str) else 0)
                 tool_results.append(
