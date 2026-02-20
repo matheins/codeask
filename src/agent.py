@@ -307,15 +307,34 @@ async def ask(
         messages.append({"role": "assistant", "content": response.content})
 
         # Append warning to the last tool result when running low on steps
-        if remaining <= 3 and tool_results:
+        if remaining <= 5 and tool_results:
             tool_results[-1]["content"] += (
-                f"\n\n[SYSTEM: You have {remaining - 1} tool steps remaining. "
-                "Give your final answer NOW based on what you have found so far.]"
+                f"\n\n[SYSTEM: You have {remaining - 1} tool call{'s' if remaining > 2 else ''} remaining. "
+                "You MUST give your final answer NOW based on what you have found so far. "
+                "Do NOT make any more tool calls.]"
             )
 
         messages.append({"role": "user", "content": tool_results})
 
-    log.warning("Reached max iterations (%d) without final answer", max_iterations)
-    return {
-        "answer": "Reached the maximum number of exploration steps. Here is what I found so far.",
-    }
+    # Max iterations reached — force one final answer-only call (no tools)
+    log.warning("Reached max iterations (%d), forcing final answer", max_iterations)
+    messages.append({
+        "role": "user",
+        "content": "[SYSTEM: You have used all your tool calls. Give your final answer "
+                   "NOW using only what you have already found. Do not apologise or say "
+                   "you ran out of steps — just answer the question directly.]",
+    })
+    response, text_chunks = await _stream_with_retry(
+        client, settings.model, messages, tools=[], system=system,
+        thinking=thinking, max_tokens=max_tokens,
+    )
+    if on_text_chunk:
+        for chunk in text_chunks:
+            await on_text_chunk(chunk)
+    answer = "\n".join(
+        block.text for block in response.content if block.type == "text"
+    )
+    messages.append({"role": "assistant", "content": response.content})
+    log.info("Forced final answer after max iterations, %d files consulted, %d chars",
+             len(files_consulted), len(answer))
+    return {"answer": answer}
