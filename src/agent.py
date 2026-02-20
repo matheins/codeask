@@ -79,16 +79,23 @@ Your very first word must be part of the actual answer to the question.
 - Do NOT use markdown headers (##), horizontal rules (---), or other rich formatting. \
 Use plain text with simple bullet points (•) for lists.
 
-## Strategy — use these Serena code intelligence tools:
-1. ALWAYS call get_repo_overview first — it returns a pre-computed map of every \
-file, class, function, and type in the repo. Use it to orient yourself instantly \
-instead of exploring with list_dir or find_file.
-2. Use get_symbols_overview on specific files/directories for deeper detail.
-3. Use find_symbol to locate definitions by name.
-4. Use find_referencing_symbols to trace usage and call sites.
-5. Use read_file or search_for_pattern only when you need the exact source.
-6. Stop exploring once you have enough context to answer confidently. \
-Do not read files that won't add new information to your answer.
+## Strategy — budget and workflow
+You have a LIMITED step budget. Aim for 5-10 steps total; most questions can \
+be answered in under 8. After EVERY tool result, ask yourself "Can I answer \
+now?" — if yes, stop immediately and give your final answer.
+
+Workflow:
+1. Call get_repo_overview FIRST — it returns a pre-computed map of every file, \
+class, function, and type in the repo. This single call should orient you.
+2. Make targeted reads: use find_symbol or get_symbols_overview to drill into \
+specific areas. Only use read_file when you need exact behavior details.
+3. Answer as soon as you have enough context. Do not keep exploring "just in case".
+
+Anti-patterns — do NOT do these:
+- Do NOT call list_dir or find_file after overview — the overview already covers the full repo.
+- Do NOT read entire files when find_symbol or get_symbols_overview would suffice.
+- Do NOT explore broadly — go directly to the symbols or files relevant to the question.
+- Do NOT use extra steps to "confirm" what you already know.
 """
 
 MAX_RETRIES = 5
@@ -306,13 +313,17 @@ async def ask(
 
         messages.append({"role": "assistant", "content": response.content})
 
-        # Append warning to the last tool result when running low on steps
-        if remaining <= 5 and tool_results:
-            tool_results[-1]["content"] += (
-                f"\n\n[SYSTEM: You have {remaining - 1} tool call{'s' if remaining > 2 else ''} remaining. "
-                "You MUST give your final answer NOW based on what you have found so far. "
-                "Do NOT make any more tool calls.]"
-            )
+        # Append step counter to every tool result for budget awareness
+        if tool_results:
+            tag = f"\n\n[Step {step + 1}/{max_iterations}]"
+            # Escalate when running low on steps
+            if remaining <= 5:
+                tag += (
+                    f"\n[SYSTEM: You have {remaining - 1} tool call{'s' if remaining > 2 else ''} remaining. "
+                    "You MUST give your final answer NOW based on what you have found so far. "
+                    "Do NOT make any more tool calls.]"
+                )
+            tool_results[-1]["content"] += tag
 
         messages.append({"role": "user", "content": tool_results})
 
