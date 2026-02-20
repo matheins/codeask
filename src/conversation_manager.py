@@ -55,6 +55,31 @@ class ConversationManager:
         if expired_cache:
             log.info("Cleaned up %d expired cache entries", len(expired_cache))
 
+    @staticmethod
+    def _has_tool_use(message: dict) -> bool:
+        """Check if an assistant message contains tool_use blocks."""
+        content = message.get("content")
+        if not isinstance(content, list):
+            return False
+        return any(
+            (isinstance(b, dict) and b.get("type") == "tool_use")
+            or (hasattr(b, "type") and b.type == "tool_use")
+            for b in content
+        )
+
+    @staticmethod
+    def _validate_history(messages: list[dict]) -> bool:
+        """Check that messages strictly alternate user/assistant starting with user."""
+        if not messages:
+            return True
+        if messages[0].get("role") != "user":
+            return False
+        for i in range(1, len(messages)):
+            expected = "assistant" if i % 2 == 1 else "user"
+            if messages[i].get("role") != expected:
+                return False
+        return True
+
     async def ask(
         self,
         question: str,
@@ -77,8 +102,17 @@ class ConversationManager:
         # Lazy cleanup on every call
         self._cleanup_expired()
 
-        # Build or retrieve message history
+        # Check response cache BEFORE touching conversation history.
+        # This prevents storing incomplete histories for cache-hit questions.
         is_followup = conversation_id and conversation_id in self._histories
+        cache_key = question.strip().lower()
+        if not is_followup and cache_key in self._response_cache:
+            cached_answer, ts = self._response_cache[cache_key]
+            if time.monotonic() - ts <= self._response_cache_ttl:
+                log.info("Cache hit for question: %s", question)
+                return {"answer": cached_answer}
+
+        # Build or retrieve message history
         if is_followup:
             messages = self._histories[conversation_id]
             messages.append({"role": "user", "content": question})
@@ -89,13 +123,13 @@ class ConversationManager:
             self._histories[conversation_id] = messages
             self._last_access[conversation_id] = time.monotonic()
 
-        # Check response cache for standalone (non-follow-up) questions
-        cache_key = question.strip().lower()
-        if not is_followup and cache_key in self._response_cache:
-            cached_answer, ts = self._response_cache[cache_key]
-            if time.monotonic() - ts <= self._response_cache_ttl:
-                log.info("Cache hit for question: %s", question)
-                return {"answer": cached_answer}
+        # Validate history alternation before sending to the API.
+        # If corrupted (e.g. from a prior error), reset to just the current question.
+        if not self._validate_history(messages):
+            log.warning("Corrupted history for conversation %s (%d msgs), resetting",
+                        conversation_id, len(messages))
+            messages.clear()
+            messages.append({"role": "user", "content": question})
 
         # Truncate history to avoid exceeding context window.
         # Keep the first user message (for context) and the most recent messages.
@@ -123,6 +157,15 @@ class ConversationManager:
                 # (no matching assistant response). Strip trailing user
                 # messages so the next request doesn't send malformed history.
                 while len(messages) > 1 and messages[-1].get("role") == "user":
+                    messages.pop()
+                # Also strip any trailing assistant message with tool_use blocks
+                # whose tool_results were just popped — dangling tool_use blocks
+                # would cause the API to reject the next request.
+                if (
+                    len(messages) > 1
+                    and messages[-1].get("role") == "assistant"
+                    and self._has_tool_use(messages[-1])
+                ):
                     messages.pop()
                 raise
 
