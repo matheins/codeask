@@ -110,6 +110,8 @@ class ConversationManager:
             cached_answer, ts = self._response_cache[cache_key]
             if time.monotonic() - ts <= self._response_cache_ttl:
                 log.info("Cache hit for question: %s", question)
+                if on_text_chunk:
+                    await on_text_chunk(cached_answer)
                 return {"answer": cached_answer}
 
         # Build or retrieve message history
