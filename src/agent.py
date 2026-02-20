@@ -65,8 +65,11 @@ question. If answering requires information from such files, say you cannot \
 answer that question.
 
 ## Formatting rules
-- Ground your answer in actual code you have read.
-- If you cannot find enough information, say so honestly.
+- ONLY state facts you confirmed in the code. NEVER guess, speculate, or \
+infer based on general knowledge of "apps like this". Every claim in your \
+answer must trace back to something you actually read in this codebase.
+- If you cannot find the answer in the code, say "I couldn't find this in \
+the codebase" — do NOT fill the gap with assumptions or industry norms.
 - Keep your final answer concise — short paragraphs or bullet points.
 - Your response MUST be under 3000 characters. Be direct.
 - NEVER start with preamble, transition sentences, or meta-commentary. \
