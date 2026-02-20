@@ -19,18 +19,22 @@ class ConversationManager:
         max_concurrency: int = 2,
         conversation_ttl: int = 3600,
         max_history_messages: int = 20,
+        response_cache_ttl: int = 86400,
     ) -> None:
         self._mcp_manager = mcp_manager
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._conversation_ttl = conversation_ttl
         self._max_history_messages = max_history_messages
+        self._response_cache_ttl = response_cache_ttl
         # conversation_id -> message history
         self._histories: dict[str, list[dict]] = {}
         # conversation_id -> last access timestamp
         self._last_access: dict[str, float] = {}
+        # normalized question -> (answer, timestamp) for standalone questions
+        self._response_cache: dict[str, tuple[str, float]] = {}
 
     def _cleanup_expired(self) -> None:
-        """Remove conversations that haven't been accessed within the TTL."""
+        """Remove conversations and cached responses that have exceeded their TTL."""
         now = time.monotonic()
         expired = [
             cid for cid, ts in self._last_access.items()
@@ -41,6 +45,15 @@ class ConversationManager:
             del self._last_access[cid]
         if expired:
             log.info("Cleaned up %d expired conversations", len(expired))
+
+        expired_cache = [
+            key for key, (_, ts) in self._response_cache.items()
+            if now - ts > self._response_cache_ttl
+        ]
+        for key in expired_cache:
+            del self._response_cache[key]
+        if expired_cache:
+            log.info("Cleaned up %d expired cache entries", len(expired_cache))
 
     async def ask(
         self,
@@ -65,7 +78,8 @@ class ConversationManager:
         self._cleanup_expired()
 
         # Build or retrieve message history
-        if conversation_id and conversation_id in self._histories:
+        is_followup = conversation_id and conversation_id in self._histories
+        if is_followup:
             messages = self._histories[conversation_id]
             messages.append({"role": "user", "content": question})
         else:
@@ -74,6 +88,14 @@ class ConversationManager:
         if conversation_id:
             self._histories[conversation_id] = messages
             self._last_access[conversation_id] = time.monotonic()
+
+        # Check response cache for standalone (non-follow-up) questions
+        cache_key = question.strip().lower()
+        if not is_followup and cache_key in self._response_cache:
+            cached_answer, ts = self._response_cache[cache_key]
+            if time.monotonic() - ts <= self._response_cache_ttl:
+                log.info("Cache hit for question: %s", question)
+                return {"answer": cached_answer}
 
         # Truncate history to avoid exceeding context window.
         # Keep the first user message (for context) and the most recent messages.
@@ -94,6 +116,10 @@ class ConversationManager:
                 on_text_chunk=on_text_chunk,
                 on_step=on_step,
             )
+
+        # Cache the response for standalone questions
+        if not is_followup:
+            self._response_cache[cache_key] = (result["answer"], time.monotonic())
 
         # Update last access after the agent run
         if conversation_id:

@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
         max_concurrency=settings.max_concurrency,
         conversation_ttl=settings.conversation_ttl,
         max_history_messages=settings.max_history_messages,
+        response_cache_ttl=settings.response_cache_ttl,
     )
     app.state.mcp_manager = mcp_manager
     app.state.conversation_manager = conversation_manager

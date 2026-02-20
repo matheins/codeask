@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     max_history_messages: int = 20
     enable_thinking: bool = True
     thinking_budget: int = 10000
+    response_cache_ttl: int = 86400  # 24 hours
 
     model_config = {"env_file": ".env"}
 
