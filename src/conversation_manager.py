@@ -110,12 +110,21 @@ class ConversationManager:
                  conversation_id or "none", len(messages), question)
 
         async with self._semaphore:
-            result = await ask(
-                messages,
-                mcp_manager=self._mcp_manager,
-                on_text_chunk=on_text_chunk,
-                on_step=on_step,
-            )
+            try:
+                result = await ask(
+                    messages,
+                    mcp_manager=self._mcp_manager,
+                    on_text_chunk=on_text_chunk,
+                    on_step=on_step,
+                )
+            except Exception:
+                # The agent loop modifies messages in-place. If it crashes
+                # mid-step the list may end with a user tool_results message
+                # (no matching assistant response). Strip trailing user
+                # messages so the next request doesn't send malformed history.
+                while len(messages) > 1 and messages[-1].get("role") == "user":
+                    messages.pop()
+                raise
 
         # Cache the response for standalone questions
         if not is_followup:

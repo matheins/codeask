@@ -273,6 +273,9 @@ async def ask(
                 if block.name == _OVERVIEW_TOOL_NAME:
                     overview = mcp_manager.get_overview()
                     result = overview or "(overview not available)"
+                elif not mcp_manager.is_mcp_tool(block.name):
+                    result = f"Error: unknown tool '{block.name}'. Use one of the tools listed in your tool definitions."
+                    log.warning("Model called unknown tool: %s", block.name)
                 else:
                     result = await mcp_manager.call_tool(block.name, block.input)
 
