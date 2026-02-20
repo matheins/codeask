@@ -191,12 +191,17 @@ async def _stream_with_retry(client, model, messages, *, tools, system,
             await _check_rate_limits(headers)
             return message, text_chunks
 
-        except anthropic.RateLimitError as e:
-            if attempt == MAX_RETRIES - 1:
+        except anthropic.APIStatusError as e:
+            is_retryable = (
+                isinstance(e, anthropic.RateLimitError)
+                or getattr(e, "status_code", 0) == 529
+            )
+            if not is_retryable or attempt == MAX_RETRIES - 1:
                 raise
             retry_after = getattr(e.response, "headers", {}).get("retry-after")
-            wait = int(retry_after) if retry_after else 60
-            log.warning("Rate limited (429), retrying in %ds (attempt %d/%d)",
+            wait = int(retry_after) if retry_after else 30
+            log.warning("%s (%d), retrying in %ds (attempt %d/%d)",
+                        type(e).__name__, e.status_code,
                         wait, attempt + 1, MAX_RETRIES)
             await asyncio.sleep(wait)
 
