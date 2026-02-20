@@ -75,9 +75,10 @@ answer that question.
 Use plain text with simple bullet points (•) for lists.
 
 ## Strategy — use these Serena code intelligence tools:
-1. Start with list_dir (recursive=true) or find_file to locate relevant areas.
-2. Use get_symbols_overview to understand what a file or module contains \
-(classes, functions, types) — much richer than reading raw source.
+1. ALWAYS call get_repo_overview first — it returns a pre-computed map of every \
+file, class, function, and type in the repo. Use it to orient yourself instantly \
+instead of exploring with list_dir or find_file.
+2. Use get_symbols_overview on specific files/directories for deeper detail.
 3. Use find_symbol to locate definitions by name.
 4. Use find_referencing_symbols to trace usage and call sites.
 5. Use read_file or search_for_pattern only when you need the exact source.
@@ -95,6 +96,7 @@ OnStep = Callable[[str], Awaitable[None]]
 
 # Maps short tool names (after last __) to generic category labels
 _TOOL_CATEGORIES: dict[str, str] = {
+    "get_repo_overview": "Analyzing",
     "read_file": "Reading",
     "list_dir": "Searching",
     "find_file": "Searching",
@@ -102,6 +104,18 @@ _TOOL_CATEGORIES: dict[str, str] = {
     "get_symbols_overview": "Analyzing",
     "find_symbol": "Analyzing",
     "find_referencing_symbols": "Analyzing",
+}
+
+# Virtual tool: pre-computed repo overview (not dispatched via MCP)
+_OVERVIEW_TOOL_NAME = "get_repo_overview"
+_OVERVIEW_TOOL_SCHEMA = {
+    "name": _OVERVIEW_TOOL_NAME,
+    "description": (
+        "Returns a pre-computed overview of every file, class, function, and "
+        "type in the repository. Call this FIRST to orient yourself before "
+        "using any other tool."
+    ),
+    "input_schema": {"type": "object", "properties": {}, "required": []},
 }
 
 
@@ -210,7 +224,7 @@ async def ask(
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
     max_iterations = settings.max_iterations
 
-    all_tools = mcp_manager.get_tool_schemas()
+    all_tools = [_OVERVIEW_TOOL_SCHEMA] + mcp_manager.get_tool_schemas()
     system = [
         {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
     ]
@@ -255,7 +269,12 @@ async def ask(
                 if on_step:
                     await on_step(_tool_category(block.name))
 
-                result = await mcp_manager.call_tool(block.name, block.input)
+                # Virtual tool: return cached overview instead of MCP dispatch
+                if block.name == _OVERVIEW_TOOL_NAME:
+                    overview = mcp_manager.get_overview()
+                    result = overview or "(overview not available)"
+                else:
+                    result = await mcp_manager.call_tool(block.name, block.input)
 
                 # Track files read via MCP
                 if block.name.endswith("__read_file"):

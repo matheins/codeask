@@ -49,8 +49,6 @@ async def lifespan(app: FastAPI):
     result = clone_or_pull()
     log.info(result)
 
-    start_periodic_sync()
-
     settings = get_settings()
 
     # Initialize MCP
@@ -60,6 +58,13 @@ async def lifespan(app: FastAPI):
         extra_config_path=settings.mcp_servers_config,
     )
     log.info("MCP manager initialized")
+
+    # Pre-compute repo overview for the agent
+    await mcp_manager.compute_overview()
+
+    # Start periodic sync (recomputes overview after each pull)
+    loop = asyncio.get_running_loop()
+    start_periodic_sync(mcp_manager=mcp_manager, loop=loop)
 
     # Initialize ConversationManager
     conversation_manager = ConversationManager(
@@ -75,7 +80,6 @@ async def lifespan(app: FastAPI):
     if settings.slack_bot_token and settings.slack_app_token:
         from src.slack_bot import start_in_background
 
-        loop = asyncio.get_running_loop()
         start_in_background(conversation_manager=conversation_manager, loop=loop)
         log.info("Slack bot started (Socket Mode)")
     else:

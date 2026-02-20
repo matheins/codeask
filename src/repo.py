@@ -1,12 +1,19 @@
+from __future__ import annotations
+
+import asyncio
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import git
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from src.mcp_client import MCPManager
 
 log = logging.getLogger(__name__)
 
@@ -45,8 +52,16 @@ def clone_or_pull() -> str:
         return f"Cloned {settings.github_repo_url} ({settings.repo_branch})"
 
 
-def start_periodic_sync() -> threading.Thread:
-    """Run clone_or_pull() in a background daemon thread on a timer."""
+def start_periodic_sync(
+    *,
+    mcp_manager: MCPManager | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
+) -> threading.Thread:
+    """Run clone_or_pull() in a background daemon thread on a timer.
+
+    If *mcp_manager* and *loop* are provided, the repo overview is
+    recomputed on the event loop after each successful sync.
+    """
     settings = get_settings()
     interval = settings.sync_interval
 
@@ -56,6 +71,10 @@ def start_periodic_sync() -> threading.Thread:
             try:
                 result = clone_or_pull()
                 log.info("[sync] %s", result)
+                if mcp_manager is not None and loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        mcp_manager.compute_overview(), loop
+                    )
             except Exception:
                 log.exception("[sync] Failed to sync repo")
 

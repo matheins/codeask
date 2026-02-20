@@ -47,6 +47,8 @@ class MCPManager:
         self._tool_map: dict[str, tuple[str, str]] = {}
         # cached Anthropic-format tool schemas
         self._tool_schemas: list[dict] = []
+        # pre-computed repo overview from Serena's get_symbols_overview
+        self._cached_overview: str | None = None
 
     async def connect_all(
         self, clone_dir: str, extra_config_path: str | None = None
@@ -161,6 +163,31 @@ class MCPManager:
         except Exception as e:
             log.exception("[mcp] Error calling tool '%s' on server '%s'", original_name, server_name)
             return f"MCP tool error: {e}"
+
+    async def compute_overview(self) -> None:
+        """Call Serena's get_symbols_overview on the repo root and cache it."""
+        session = self._sessions.get(_SERENA_SERVER_NAME)
+        if session is None:
+            log.warning("[mcp] Cannot compute overview: Serena not connected")
+            return
+        try:
+            result = await session.call_tool(
+                "get_symbols_overview", {"path": "."}
+            )
+            parts = []
+            for block in result.content:
+                if hasattr(block, "text"):
+                    parts.append(block.text)
+                else:
+                    parts.append(str(block))
+            self._cached_overview = "\n".join(parts) if parts else None
+            length = len(self._cached_overview) if self._cached_overview else 0
+            log.info("[mcp] Repo overview computed (%d chars)", length)
+        except Exception:
+            log.exception("[mcp] Failed to compute repo overview")
+
+    def get_overview(self) -> str | None:
+        return self._cached_overview
 
     async def shutdown(self) -> None:
         """Close all MCP server connections."""
