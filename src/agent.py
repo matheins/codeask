@@ -69,8 +69,10 @@ answer that question.
 - If you cannot find enough information, say so honestly.
 - Keep your final answer concise — short paragraphs or bullet points.
 - Your response MUST be under 3000 characters. Be direct.
-- Do NOT include any preamble, intro sentences, or meta-commentary like \
-"Let me explain" or "Based on my analysis". Jump straight into the answer.
+- NEVER start with preamble, transition sentences, or meta-commentary. \
+Forbidden examples: "I now have enough information…", "Based on my analysis…", \
+"Let me explain…", "After reviewing the code…", "Here's what I found…". \
+Your very first word must be part of the actual answer to the question.
 - Do NOT use markdown headers (##), horizontal rules (---), or other rich formatting. \
 Use plain text with simple bullet points (•) for lists.
 
