@@ -93,23 +93,41 @@ def start_in_background(
 
         # Strip the <@BOT_ID> mention prefix to get the actual question
         question = re.sub(r"<@[A-Z0-9]+>\s*", "", raw_text).strip()
-
-        if not question:
-            client.chat_postMessage(
-                channel=channel,
-                thread_ts=thread_ts,
-                text="Please include a question after mentioning me.",
-            )
-            return
+        is_in_thread = "thread_ts" in event
 
         # Prepend any thread messages the bot missed (sent without mentioning it)
         missed = _get_missed_thread_messages(client, channel, thread_ts, event["ts"])
+
+        if not question and not missed:
+            if is_in_thread:
+                # In a thread with no new messages — ask based on full thread history
+                question = (
+                    "The user mentioned you in this thread without a specific"
+                    " question. Please review the conversation history and"
+                    " provide a helpful follow-up or ask if they need"
+                    " clarification."
+                )
+            else:
+                client.chat_postMessage(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="Please include a question after mentioning me.",
+                )
+                return
+
         if missed:
             context = "\n".join(f"- {m}" for m in missed)
-            question = (
-                f"[Messages in this thread since last response:]\n{context}"
-                f"\n\n[New question:]\n{question}"
-            )
+            if question:
+                question = (
+                    f"[Messages in this thread since last response:]\n{context}"
+                    f"\n\n[New question:]\n{question}"
+                )
+            else:
+                question = (
+                    f"[Messages in this thread since last response:]\n{context}"
+                    f"\n\nThe user mentioned you without adding a question."
+                    f" Please respond to the messages above."
+                )
 
         # Post a "thinking" placeholder
         thinking = client.chat_postMessage(
