@@ -73,21 +73,36 @@ class MCPManager:
         # 2. Optional built-in database server — non-fatal
         if database_url:
             db_script = str(Path(__file__).with_name("db_server.py"))
+            db_env = {
+                **os.environ,
+                "DATABASE_URL": database_url,
+                "DB_MAX_ROWS": str(db_max_rows),
+                "DB_QUERY_TIMEOUT": str(db_query_timeout),
+            }
             db_cfg = {
                 "command": sys.executable,
                 "args": [db_script],
-                "env": {
-                    **os.environ,
-                    "DATABASE_URL": database_url,
-                    "DB_MAX_ROWS": str(db_max_rows),
-                    "DB_QUERY_TIMEOUT": str(db_query_timeout),
-                },
+                "env": db_env,
             }
             try:
                 await self._connect_server(_DB_SERVER_NAME, db_cfg)
             except Exception:
-                log.exception(
-                    "[mcp] Failed to connect to database server (non-fatal)"
+                # Run a quick connectivity check to surface the actual error
+                import subprocess
+                probe = subprocess.run(
+                    [sys.executable, "-c",
+                     "from src.db_server import _normalize_url; "
+                     "from sqlalchemy import create_engine, text; "
+                     "import os; "
+                     "url = _normalize_url(os.environ['DATABASE_URL']); "
+                     "e = create_engine(url); "
+                     "c = e.connect(); c.execute(text('SELECT 1')); c.close()"],
+                    env=db_env, capture_output=True, text=True, timeout=15,
+                )
+                detail = (probe.stderr or probe.stdout or "").strip()
+                log.error(
+                    "[mcp] Database server failed to start (non-fatal)%s",
+                    f": {detail}" if detail else "",
                 )
 
         # 3. Optional extra servers from config file
@@ -116,10 +131,10 @@ class MCPManager:
             env=cfg.get("env"),
         )
 
-        devnull = open(os.devnull, "w")
-        self._exit_stack.callback(devnull.close)
+        errlog = open(os.devnull, "w")
+        self._exit_stack.callback(errlog.close)
         stdio_transport = await self._exit_stack.enter_async_context(
-            stdio_client(params, errlog=devnull)
+            stdio_client(params, errlog=errlog)
         )
         read_stream, write_stream = stdio_transport
         session = await self._exit_stack.enter_async_context(
