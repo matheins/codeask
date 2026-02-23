@@ -269,6 +269,8 @@ async def ask(
     prompt_text = SYSTEM_PROMPT
     if mcp_manager.has_database():
         prompt_text += _DB_PROMPT_SUPPLEMENT
+    if settings.custom_instructions:
+        prompt_text += "\n\n## Additional context\n" + settings.custom_instructions
     system = [
         {"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}
     ]

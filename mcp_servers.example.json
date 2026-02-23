@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "stripe": {
+      "command": "npx",
+      "args": ["-y", "@stripe/mcp@latest"],
+      "env": {
+        "STRIPE_SECRET_KEY": "rk_test_..."
+      }
+    },
+    "attio": {
+      "command": "npx",
+      "args": ["attio-mcp"],
+      "env": {
+        "ATTIO_API_KEY": "...",
+        "ATTIO_MCP_TOOL_MODE": "search"
+      }
+    }
+  }
+}

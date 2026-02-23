@@ -105,24 +105,27 @@ class MCPManager:
                     f": {detail}" if detail else "",
                 )
 
-        # 3. Optional extra servers from config file
+        # 3. Optional extra servers from config file or inline JSON
         if extra_config_path:
-            path = Path(extra_config_path)
-            if path.is_file():
-                config = json.loads(path.read_text())
-                servers = config.get("mcpServers", {})
-                for server_name, server_cfg in servers.items():
-                    try:
-                        await self._connect_server(server_name, server_cfg)
-                    except Exception:
-                        log.exception(
-                            "[mcp] Failed to connect to extra server '%s'",
-                            server_name,
-                        )
+            raw = extra_config_path.strip()
+            if raw.startswith("{"):
+                config = json.loads(raw)
             else:
-                log.warning(
-                    "[mcp] Extra config file not found: %s", extra_config_path
-                )
+                path = Path(raw)
+                if path.is_file():
+                    config = json.loads(path.read_text())
+                else:
+                    log.warning("[mcp] Extra config file not found: %s", raw)
+                    config = {}
+            servers = config.get("mcpServers", {})
+            for server_name, server_cfg in servers.items():
+                try:
+                    await self._connect_server(server_name, server_cfg)
+                except Exception:
+                    log.exception(
+                        "[mcp] Failed to connect to extra server '%s'",
+                        server_name,
+                    )
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
         params = StdioServerParameters(

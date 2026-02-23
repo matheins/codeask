@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     database_url: str | None = None
     db_max_rows: int = 100
     db_query_timeout: int = 30
+    custom_instructions: str | None = None
 
     model_config = {"env_file": ".env"}
 
