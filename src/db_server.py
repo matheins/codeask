@@ -76,21 +76,28 @@ _URL_REWRITES = [
     ("mysql://", "mysql+pymysql://"),
 ]
 
-# Query param rewrites: provider-specific → SQLAlchemy/driver equivalent
-_PARAM_REWRITES = [
-    ("sslaccept=strict", "ssl_mode=REQUIRED"),
-]
+# Provider-specific SSL params to strip from the URL (handled via connect_args)
+_SSL_PARAMS = ("sslaccept=strict", "ssl_mode=REQUIRED", "ssl_mode=required")
 
 
-def _normalize_url(url: str) -> str:
-    """Rewrite common DATABASE_URL formats to SQLAlchemy dialect+driver format."""
+def _normalize_url(url: str) -> tuple[str, dict]:
+    """Rewrite common DATABASE_URL formats and extract connect_args.
+
+    Returns (url, connect_args) ready for create_engine().
+    """
     for prefix, replacement in _URL_REWRITES:
         if url.startswith(prefix):
             url = replacement + url[len(prefix):]
             break
-    for old, new in _PARAM_REWRITES:
-        url = url.replace(old, new)
-    return url
+
+    connect_args: dict = {}
+    for param in _SSL_PARAMS:
+        if param in url:
+            url = url.replace(param, "").replace("?&", "?").rstrip("?&")
+            connect_args["ssl"] = {"ssl_mode": "REQUIRED"}
+            break
+
+    return url, connect_args
 
 
 # ---------------------------------------------------------------------------
@@ -110,11 +117,11 @@ def _main() -> None:
     from mcp.server.fastmcp import FastMCP
     from sqlalchemy import create_engine, inspect, text
 
-    DATABASE_URL = _normalize_url(os.environ["DATABASE_URL"])
+    url, connect_args = _normalize_url(os.environ["DATABASE_URL"])
     DB_MAX_ROWS = int(os.environ.get("DB_MAX_ROWS", "100"))
     DB_QUERY_TIMEOUT = int(os.environ.get("DB_QUERY_TIMEOUT", "30"))
 
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
     dialect_name = engine.dialect.name
     mcp = FastMCP("database")
 

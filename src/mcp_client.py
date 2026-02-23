@@ -94,8 +94,8 @@ class MCPManager:
                      "from src.db_server import _normalize_url; "
                      "from sqlalchemy import create_engine, text; "
                      "import os; "
-                     "url = _normalize_url(os.environ['DATABASE_URL']); "
-                     "e = create_engine(url); "
+                     "url, ca = _normalize_url(os.environ['DATABASE_URL']); "
+                     "e = create_engine(url, connect_args=ca); "
                      "c = e.connect(); c.execute(text('SELECT 1')); c.close()"],
                     env=db_env, capture_output=True, text=True, timeout=15,
                 )
