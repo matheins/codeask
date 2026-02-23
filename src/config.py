@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     repo_branch: str = "main"
     clone_dir: str = "./repo"
-    model: str = "claude-sonnet-4-6-20250514"
+    model: str = "claude-sonnet-4-6"
     slack_bot_token: str | None = None
     slack_app_token: str | None = None
     sync_interval: int = 300
@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     enable_thinking: bool = True
     thinking_budget: int = 10000
     response_cache_ttl: int = 86400  # 24 hours
+    database_url: str | None = None
+    db_max_rows: int = 100
+    db_query_timeout: int = 30
 
     model_config = {"env_file": ".env"}
 

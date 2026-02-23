@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -28,6 +29,7 @@ _HIDDEN_TOOLS = {
 }
 
 _SERENA_SERVER_NAME = "serena"
+_DB_SERVER_NAME = "database"
 _SERENA_COMMAND = "uvx"
 _SERENA_ARGS_PREFIX = [
     "--from", "git+https://github.com/oraios/serena",
@@ -51,7 +53,12 @@ class MCPManager:
         self._cached_overview: str | None = None
 
     async def connect_all(
-        self, clone_dir: str, extra_config_path: str | None = None
+        self,
+        clone_dir: str,
+        extra_config_path: str | None = None,
+        database_url: str | None = None,
+        db_max_rows: int = 100,
+        db_query_timeout: int = 30,
     ) -> None:
         """Connect to built-in Serena server and any extra MCP servers."""
         await self._exit_stack.__aenter__()
@@ -63,7 +70,27 @@ class MCPManager:
         }
         await self._connect_server(_SERENA_SERVER_NAME, serena_cfg)
 
-        # 2. Optional extra servers from config file
+        # 2. Optional built-in database server — non-fatal
+        if database_url:
+            db_script = str(Path(__file__).with_name("db_server.py"))
+            db_cfg = {
+                "command": sys.executable,
+                "args": [db_script],
+                "env": {
+                    **os.environ,
+                    "DATABASE_URL": database_url,
+                    "DB_MAX_ROWS": str(db_max_rows),
+                    "DB_QUERY_TIMEOUT": str(db_query_timeout),
+                },
+            }
+            try:
+                await self._connect_server(_DB_SERVER_NAME, db_cfg)
+            except Exception:
+                log.exception(
+                    "[mcp] Failed to connect to database server (non-fatal)"
+                )
+
+        # 3. Optional extra servers from config file
         if extra_config_path:
             path = Path(extra_config_path)
             if path.is_file():
@@ -145,6 +172,9 @@ class MCPManager:
 
     def is_mcp_tool(self, name: str) -> bool:
         return name in self._tool_map
+
+    def has_database(self) -> bool:
+        return _DB_SERVER_NAME in self._sessions
 
     async def call_tool(self, name: str, arguments: dict) -> str:
         """Dispatch a tool call to the correct MCP server session."""

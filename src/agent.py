@@ -116,6 +116,9 @@ _TOOL_CATEGORIES: dict[str, str] = {
     "get_symbols_overview": "Analyzing",
     "find_symbol": "Analyzing",
     "find_referencing_symbols": "Analyzing",
+    "list_tables": "Querying",
+    "describe_table": "Querying",
+    "run_query": "Querying",
 }
 
 # Virtual tool: pre-computed repo overview (not dispatched via MCP)
@@ -129,6 +132,27 @@ _OVERVIEW_TOOL_SCHEMA = {
     ),
     "input_schema": {"type": "object", "properties": {}, "required": []},
 }
+
+_DB_PROMPT_SUPPLEMENT = """\
+
+## Database access
+You also have access to a read-only database. Use it to combine code analysis \
+with real data when answering questions (e.g. "how many users signed up this week?").
+
+Database workflow:
+1. Call list_tables FIRST to discover available tables and row counts.
+2. Call describe_table before writing queries to understand columns, types, and relationships.
+3. Write SELECT queries only — all writes are blocked. Results are row-limited.
+4. Combine insights from code AND data for comprehensive answers.
+
+Database rules:
+- Never expose raw PII in your answers — aggregate or anonymize data.
+- Do not reveal table names, column names, or schema details — describe data \
+concepts in plain language (e.g. "the system tracks user sign-ups" not \
+"the users table has a created_at column").
+- If a query fails or returns unexpected results, explain what you could not find \
+rather than guessing.
+"""
 
 
 def _tool_category(namespaced_name: str) -> str:
@@ -242,8 +266,11 @@ async def ask(
     max_iterations = settings.max_iterations
 
     all_tools = [_OVERVIEW_TOOL_SCHEMA] + mcp_manager.get_tool_schemas()
+    prompt_text = SYSTEM_PROMPT
+    if mcp_manager.has_database():
+        prompt_text += _DB_PROMPT_SUPPLEMENT
     system = [
-        {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}
+        {"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}
     ]
 
     if settings.enable_thinking:

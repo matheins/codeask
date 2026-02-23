@@ -56,8 +56,14 @@ async def lifespan(app: FastAPI):
     await mcp_manager.connect_all(
         clone_dir=settings.clone_dir,
         extra_config_path=settings.mcp_servers_config,
+        database_url=settings.database_url,
+        db_max_rows=settings.db_max_rows,
+        db_query_timeout=settings.db_query_timeout,
     )
-    log.info("MCP manager initialized")
+    log.info(
+        "MCP manager initialized (database: %s)",
+        "enabled" if mcp_manager.has_database() else "disabled",
+    )
 
     # Pre-compute repo overview for the agent
     await mcp_manager.compute_overview()

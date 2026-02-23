@@ -34,6 +34,7 @@ so it actually reads and understands your code before answering.
 - **Instant answers** — ask plain-English questions, get responses grounded in your actual source code
 - **Slack-native** — mention the bot in any channel and get answers where your team already works
 - **Always up-to-date** — auto-syncs the repo on a configurable interval so answers reflect the latest code
+- **Database-aware** — optionally connect a read-only database so the agent can combine code analysis with real data queries
 - **Extensible** — plug in additional [MCP](https://modelcontextprotocol.io/) tool servers alongside the built-in Serena code intelligence
 
 ## How It Works
@@ -50,17 +51,18 @@ so it actually reads and understands your code before answering.
                │  (agentic loop) │
                └────────┬────────┘
                         │  tool calls
-                        ▼
-               ┌─────────────────┐
-               │  Serena (MCP)   │
-               │ code intelligence│
-               └────────┬────────┘
-                        │  reads code
-                        ▼
-               ┌─────────────────┐
-               │   Your Repo     │
-               │  (auto-synced)  │
-               └─────────────────┘
+                ┌───────┴───────┐
+                ▼               ▼
+       ┌─────────────────┐  ┌──────────────┐
+       │  Serena (MCP)   │  │ Database MCP │
+       │ code intelligence│  │ (optional)   │
+       └────────┬────────┘  └──────┬───────┘
+                │  reads code      │  queries
+                ▼                  ▼
+       ┌─────────────────┐  ┌──────────────┐
+       │   Your Repo     │  │  Your DB     │
+       │  (auto-synced)  │  │ (read-only)  │
+       └─────────────────┘  └──────────────┘
 ```
 
 ## Quick Start
@@ -100,6 +102,9 @@ docker run --env-file .env -p 8000:8000 codeask
 | `MAX_ITERATIONS` | No | Max agent tool-call rounds (default: `20`) |
 | `ENABLE_THINKING` | No | Enable extended thinking for deeper reasoning (default: `true`) |
 | `THINKING_BUDGET` | No | Token budget for thinking when enabled (default: `10000`) |
+| `DATABASE_URL` | No | SQLAlchemy connection URL for read-only DB access (see [Database Integration](#database-integration)) |
+| `DB_MAX_ROWS` | No | Max rows returned per query (default: `100`) |
+| `DB_QUERY_TIMEOUT` | No | Query timeout in seconds (default: `30`) |
 
 ## API Reference
 
@@ -166,6 +171,56 @@ SLACK_APP_TOKEN=xapp-your-app-token
 ```
 
 The bot will start automatically when both tokens are present. Invite it to a channel and mention it to ask a question.
+
+## Database Integration
+
+CodeAsk can optionally connect to a read-only database, allowing the agent to combine code analysis with real data queries. When enabled, the agent can answer questions like "how many users signed up this week?" by understanding the schema from code **and** querying the actual database.
+
+### Setup
+
+Set `DATABASE_URL` in your `.env` file. Standard connection URLs work — no special format needed:
+
+```bash
+# PostgreSQL
+DATABASE_URL=postgres://user:password@localhost:5432/mydb
+
+# MySQL
+DATABASE_URL=mysql://user:password@localhost:3306/mydb
+
+# SQLite
+DATABASE_URL=sqlite:///path/to/database.db
+```
+
+Drivers for PostgreSQL and MySQL are bundled — no extra install steps.
+
+### Agent Tools
+
+When `DATABASE_URL` is set, three tools are exposed to the agent:
+
+| Tool | Description |
+|---|---|
+| `list_tables` | Lists all tables with row counts |
+| `describe_table` | Shows columns, types, PKs, FKs, and indexes for a table |
+| `run_query` | Executes a read-only SQL query (SELECT/WITH/EXPLAIN only) |
+
+### Security Model
+
+Database access is **read-only** with defense in depth:
+
+- **Read-only transactions** — connections use `SET TRANSACTION READ ONLY` (PostgreSQL/MySQL) to enforce read-only at the database level
+- **SQL validation** — queries are parsed and rejected if they contain write operations (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `INTO`, etc.)
+- **Multi-statement rejection** — only single SQL statements are allowed
+- **Row limits** — results are capped at `DB_MAX_ROWS` (default 100)
+- **Query timeouts** — dialect-specific statement timeouts prevent long-running queries
+- **PII protection** — the agent is instructed to aggregate/anonymize data and never expose raw PII
+
+> **Recommendation:** For production deployments, create a dedicated read-only database user with `SELECT`-only privileges. This provides the strongest guarantee regardless of application-level checks.
+
+### Behavior
+
+- The database server is **optional** — when `DATABASE_URL` is not set, no database tools are exposed
+- Connection failure is **non-fatal** — the agent continues with code-only tools if the database is unavailable
+- The agent automatically receives instructions for using database tools alongside code analysis when the database is connected
 
 ## Extending with MCP Servers
 

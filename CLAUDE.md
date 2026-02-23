@@ -20,7 +20,7 @@ docker build -t codeask .
 docker run --env-file .env -p 8000:8000 codeask
 
 # Verify Python files compile (no test suite exists)
-python3 -m py_compile src/main.py src/agent.py src/mcp_client.py src/slack_bot.py src/config.py src/repo.py
+python3 -m py_compile src/main.py src/agent.py src/mcp_client.py src/slack_bot.py src/config.py src/repo.py src/db_server.py
 ```
 
 ## Architecture
@@ -39,14 +39,17 @@ HTTP `POST /ask` or Slack `@mention` → `agent.ask()` → agentic loop (up to `
 | `src/slack_bot.py` | Slack Socket Mode bot, `app_mention` handler, thread context fetching |
 | `src/config.py` | `pydantic-settings` BaseSettings, accessed via `@lru_cache get_settings()` |
 | `src/repo.py` | Git clone/pull, periodic background sync with `repo_lock` threading.Lock |
+| `src/db_server.py` | Standalone MCP server for read-only DB access via SQLAlchemy (launched as subprocess) |
 
 ### Startup Sequence (lifespan in main.py)
 
 1. Validate required env vars (`API_KEY`)
 2. Clone or pull the target GitHub repo into `CLONE_DIR`
 3. Start periodic sync daemon thread (`SYNC_INTERVAL` seconds)
-4. Connect Serena MCP server (built-in, fatal on failure) + any extra MCP servers from `MCP_SERVERS_CONFIG`
-5. Optionally start Slack bot if both Slack tokens are set
+4. Connect Serena MCP server (built-in, fatal on failure)
+5. Connect database MCP server if `DATABASE_URL` is set (non-fatal on failure)
+6. Connect any extra MCP servers from `MCP_SERVERS_CONFIG`
+7. Optionally start Slack bot if both Slack tokens are set
 
 ### MCP Tool Namespacing
 
@@ -63,6 +66,12 @@ Enabled by default. When `ENABLE_THINKING=true` (the default), the agentic loop 
 ### Rate-Limit Retry (`agent.py`)
 
 Uses `client.messages.with_raw_response.create()` to read `anthropic-ratelimit-*` headers. Proactively sleeps when input tokens remaining < 20% or requests remaining hits 0. Retries 429s up to 5 times using `retry-after` header.
+
+### Database MCP Server (`db_server.py`)
+
+Optional, enabled when `DATABASE_URL` is set. Launched as a subprocess by `MCPManager` (like Serena, but non-fatal). Uses SQLAlchemy for multi-DB support (PostgreSQL, MySQL, SQLite). Common URL prefixes (`postgres://`, `mysql://`) are auto-normalized to include the SQLAlchemy driver.
+
+Exposes three tools: `list_tables`, `describe_table`, `run_query`. Read-only enforcement is defense-in-depth: SQL validation (prefix allowlist + keyword blocklist + comment/literal stripping), `SET TRANSACTION READ ONLY` at DB level, row limits, and query timeouts. The agent's system prompt is conditionally extended with DB instructions when `mcp_manager.has_database()` is true.
 
 ### Slack Bot Threading
 
