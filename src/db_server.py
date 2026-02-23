@@ -76,12 +76,20 @@ _URL_REWRITES = [
     ("mysql://", "mysql+pymysql://"),
 ]
 
+# Query param rewrites: provider-specific → SQLAlchemy/driver equivalent
+_PARAM_REWRITES = [
+    ("sslaccept=strict", "ssl_mode=REQUIRED"),
+]
+
 
 def _normalize_url(url: str) -> str:
-    """Rewrite common DATABASE_URL prefixes to include the SQLAlchemy driver."""
+    """Rewrite common DATABASE_URL formats to SQLAlchemy dialect+driver format."""
     for prefix, replacement in _URL_REWRITES:
         if url.startswith(prefix):
-            return replacement + url[len(prefix):]
+            url = replacement + url[len(prefix):]
+            break
+    for old, new in _PARAM_REWRITES:
+        url = url.replace(old, new)
     return url
 
 
