@@ -192,6 +192,20 @@ async def _check_rate_limits(headers) -> None:
         await asyncio.sleep(max_wait)
 
 
+def _is_overloaded_body(e: anthropic.APIStatusError) -> bool:
+    """Detect overloaded errors from the response body.
+
+    When an overloaded error arrives mid-stream (after an initial 200 OK),
+    the status_code won't be 529 — check the body instead.
+    """
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            return err.get("type") == "overloaded_error"
+    return False
+
+
 async def _stream_with_retry(client, model, messages, *, tools, system,
                              thinking=None, max_tokens=4096):
     """Stream a response with rate-limit retry logic.
@@ -229,6 +243,7 @@ async def _stream_with_retry(client, model, messages, *, tools, system,
             is_retryable = (
                 isinstance(e, anthropic.RateLimitError)
                 or getattr(e, "status_code", 0) == 529
+                or _is_overloaded_body(e)
             )
             if not is_retryable or attempt == MAX_RETRIES - 1:
                 raise
