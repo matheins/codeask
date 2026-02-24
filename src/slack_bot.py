@@ -100,13 +100,41 @@ def start_in_background(
 
         if not question and not missed:
             if is_in_thread:
-                # In a thread with no new messages — ask based on full thread history
-                question = (
-                    "The user mentioned you in this thread without a specific"
-                    " question. Please review the conversation history and"
-                    " provide a helpful follow-up or ask if they need"
-                    " clarification."
-                )
+                # No text and no missed messages — fetch full thread context
+                # so the agent can see what was discussed.
+                try:
+                    result = client.conversations_replies(
+                        channel=channel, ts=thread_ts,
+                    )
+                    thread_msgs = []
+                    for msg in result.get("messages", []):
+                        if bot_user_id and msg.get("user") == bot_user_id:
+                            continue
+                        if msg["ts"] == event["ts"]:
+                            continue
+                        text = re.sub(
+                            r"<@[A-Z0-9]+>\s*", "", msg.get("text", ""),
+                        ).strip()
+                        if text:
+                            thread_msgs.append(text)
+                except Exception:
+                    thread_msgs = []
+
+                if thread_msgs:
+                    context = "\n".join(f"- {m}" for m in thread_msgs)
+                    question = (
+                        f"[Thread context:]\n{context}"
+                        f"\n\nThe user re-mentioned you without adding a new"
+                        f" question. Please respond based on the thread"
+                        f" context above."
+                    )
+                else:
+                    question = (
+                        "The user mentioned you in this thread without a"
+                        " specific question. Please review the conversation"
+                        " history and provide a helpful follow-up or ask if"
+                        " they need clarification."
+                    )
             else:
                 client.chat_postMessage(
                     channel=channel,
