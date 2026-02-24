@@ -98,7 +98,8 @@ docker run --env-file .env -p 8000:8000 codeask
 | `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | No | Slack app token (`xapp-...`) for Socket Mode |
 | `SYNC_INTERVAL` | No | Seconds between repo syncs (default: `300`) |
-| `MCP_SERVERS_CONFIG` | No | Path to JSON config for additional MCP tool servers (Serena is built-in) |
+| `MCP_SERVERS_CONFIG` | No | Path to JSON config (or inline JSON) for additional MCP tool servers (Serena is built-in) |
+| `CUSTOM_INSTRUCTIONS` | No | Extra context appended to the agent's system prompt (see [Custom Instructions](#custom-instructions)) |
 | `MAX_ITERATIONS` | No | Max agent tool-call rounds (default: `20`) |
 | `ENABLE_THINKING` | No | Enable extended thinking for deeper reasoning (default: `true`) |
 | `THINKING_BUDGET` | No | Token budget for thinking when enabled (default: `10000`) |
@@ -221,6 +222,16 @@ Database access is **read-only** with defense in depth:
 - The database server is **optional** — when `DATABASE_URL` is not set, no database tools are exposed
 - Connection failure is **non-fatal** — the agent continues with code-only tools if the database is unavailable
 - The agent automatically receives instructions for using database tools alongside code analysis when the database is connected
+
+## Custom Instructions
+
+Use `CUSTOM_INSTRUCTIONS` to give the agent context about your product that isn't obvious from the code alone. This is especially useful when you have multiple MCP servers connected — the agent can use this context to pick the right tool for the job.
+
+```bash
+CUSTOM_INSTRUCTIONS="Our Organizations table has a stripeCustomerId column. When asked about billing or subscription questions, first query the database for the relevant org to get the Stripe ID, then use that ID with the Stripe MCP tools to look up invoices, subscriptions, or payment status."
+```
+
+The text is appended to the agent's system prompt as-is, so write it the way you'd brief a new teammate.
 
 ## Extending with MCP Servers
 
