@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     db_max_rows: int = 100
     db_query_timeout: int = 30
     custom_instructions: str | None = None
+    slack_response_timeout: int = 900  # seconds to wait for agent answer
 
     model_config = {"env_file": ".env"}
 

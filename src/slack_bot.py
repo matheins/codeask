@@ -179,8 +179,11 @@ def start_in_background(
         buf = []
         last_update = [0.0]  # mutable for closure
         step_count = [0]  # mutable for closure
+        cancelled = [False]  # set on timeout to stop callbacks
 
         async def on_step(category: str):
+            if cancelled[0]:
+                return
             step_count[0] += 1
             emoji = step_emojis.get(category, ":compass:")
             step_text = f"{emoji} {category}..."
@@ -197,6 +200,8 @@ def start_in_background(
                 pass  # skip silently; final update will send the complete answer
 
         async def on_text_chunk(text: str):
+            if cancelled[0]:
+                return
             buf.append(text)
             now = time.monotonic()
             if now - last_update[0] < _UPDATE_THROTTLE:
@@ -231,7 +236,12 @@ def start_in_background(
             # (which live on that loop) are accessible.
             if loop is not None:
                 future = asyncio.run_coroutine_threadsafe(coro, loop)
-                result = future.result(timeout=300)
+                try:
+                    result = future.result(timeout=settings.slack_response_timeout)
+                except TimeoutError:
+                    cancelled[0] = True
+                    future.cancel()
+                    raise
             else:
                 result = asyncio.run(coro)
 
@@ -245,6 +255,14 @@ def start_in_background(
                 channel=channel,
                 ts=thinking["ts"],
                 text=text,
+            )
+        except TimeoutError:
+            log.warning("[slack] Timed out after %ds answering question",
+                        settings.slack_response_timeout)
+            client.chat_update(
+                channel=channel,
+                ts=thinking["ts"],
+                text=":hourglass: Sorry, this question took too long to answer (likely due to API rate limits). Please try again in a minute.",
             )
         except Exception:
             log.exception("[slack] Error answering question")
