@@ -7,6 +7,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+import anthropic
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
@@ -264,6 +265,22 @@ def start_in_background(
                 ts=thinking["ts"],
                 text=":hourglass: Sorry, this question took too long to answer (likely due to API rate limits). Please try again in a minute.",
             )
+        except anthropic.APIStatusError as e:
+            from src.agent import _is_overloaded_body
+            if e.status_code in (429, 529) or _is_overloaded_body(e):
+                log.warning("[slack] API overloaded/rate-limited answering question")
+                client.chat_update(
+                    channel=channel,
+                    ts=thinking["ts"],
+                    text=":warning: The AI service is temporarily overloaded. Please try again in a few minutes.",
+                )
+            else:
+                log.exception("[slack] API error answering question")
+                client.chat_update(
+                    channel=channel,
+                    ts=thinking["ts"],
+                    text=":x: Sorry, something went wrong while answering your question.",
+                )
         except Exception:
             log.exception("[slack] Error answering question")
             client.chat_update(
