@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     repo_branch: str = "main"
     clone_dir: str = "./repo"
-    model: str = "claude-sonnet-4-6"
+    model: str = "claude-opus-4-7"
     slack_bot_token: str | None = None
     slack_app_token: str | None = None
     sync_interval: int = 300
