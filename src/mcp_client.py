@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -27,6 +28,33 @@ _HIDDEN_TOOLS = {
     "delete_memory",
     "edit_memory",
 }
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env_vars(value):
+    """Recursively replace ${VAR} in strings with os.environ values.
+
+    Missing variables are replaced with an empty string and logged as a warning.
+    Non-string values pass through unchanged.
+    """
+    if isinstance(value, str):
+        def replace(match: re.Match) -> str:
+            var = match.group(1)
+            if var not in os.environ:
+                log.warning(
+                    "[mcp] Environment variable '%s' referenced in config is not set",
+                    var,
+                )
+                return ""
+            return os.environ[var]
+        return _ENV_VAR_PATTERN.sub(replace, value)
+    if isinstance(value, dict):
+        return {k: _expand_env_vars(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_vars(v) for v in value]
+    return value
+
 
 _SERENA_SERVER_NAME = "serena"
 _DB_SERVER_NAME = "database"
@@ -120,7 +148,7 @@ class MCPManager:
             servers = config.get("mcpServers", {})
             for server_name, server_cfg in servers.items():
                 try:
-                    await self._connect_server(server_name, server_cfg)
+                    await self._connect_server(server_name, _expand_env_vars(server_cfg))
                 except Exception:
                     log.exception(
                         "[mcp] Failed to connect to extra server '%s'",

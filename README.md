@@ -250,7 +250,28 @@ To give the agent access to additional tools, create a JSON config file and poin
 }
 ```
 
-Any server that speaks the [Model Context Protocol](https://modelcontextprotocol.io/) will work. Extra server failures are non-fatal — the agent continues with Serena and any other servers that connected successfully.
+Any server that speaks the [Model Context Protocol](https://modelcontextprotocol.io/) will work. Only stdio transport is supported. Extra server failures are non-fatal — the agent continues with Serena and any other servers that connected successfully.
+
+### Referencing secrets from the environment
+
+Use `${VAR}` placeholders anywhere in the config to pull values from the host environment (e.g. your `.env`). This keeps secrets out of the config file so it's safe to commit:
+
+```json
+{
+  "mcpServers": {
+    "signoz": {
+      "command": "/path/to/signoz-mcp-server",
+      "env": {
+        "SIGNOZ_URL": "${SIGNOZ_URL}",
+        "SIGNOZ_API_KEY": "${SIGNOZ_API_KEY}",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
+```
+
+Substitution happens at startup before the subprocess is spawned. Unset variables are replaced with an empty string and a warning is logged.
 
 ## Contributing
 

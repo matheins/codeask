@@ -59,6 +59,8 @@ Tools are namespaced as `mcp__{server_name}__{tool_name}` (e.g. `mcp__serena__re
 
 Serena's MCP config is hardcoded in `mcp_client.py` — it launches via `uvx --from git+https://github.com/oraios/serena`. `MCP_SERVERS_CONFIG` is optional and only for *additional* MCP servers. Extra server failures are non-fatal (logged and skipped); Serena failure is fatal.
 
+Extra-server configs support `${VAR}` substitution against `os.environ` via `_expand_env_vars` in `mcp_client.py`. Applied recursively to string values in the server config (command, args, env) before spawning. Missing vars resolve to `""` with a warning log. Transport is stdio-only (`StdioServerParameters` / `stdio_client`).
+
 ### Extended Thinking (`agent.py`)
 
 Enabled by default. When `ENABLE_THINKING=true` (the default), the agentic loop passes `thinking={"type": "enabled", "budget_tokens": N}` to the Anthropic API. `max_tokens` is set to `thinking_budget + 4096` to cover both thinking and output. Thinking blocks are preserved in conversation history but excluded from the final answer (filtered by `block.type == "text"`).
